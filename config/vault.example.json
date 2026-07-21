@@ -1,0 +1,14 @@
+{
+  "channel_url": "https://www.youtube.com/@example/videos",
+  "creator": "Example Creator",
+  "max_videos": 80,
+  "caption_languages": ["en-orig", "en"],
+  "yt_dlp_path": "yt-dlp",
+  "proxy": "",
+  "cookie_file": "",
+  "js_runtime": "",
+  "drive_remote": "",
+  "drive_path": "Wikis/MyChannelWiki",
+  "claude_effort": "high",
+  "claude_budget_usd": 10
+}
