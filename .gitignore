@@ -1,0 +1,8 @@
+.env
+*.log
+*.cookie*
+secrets/
+private-corpus/
+production-config/
+.DS_Store
+Thumbs.db
