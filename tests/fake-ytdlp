@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ " $* " == *" --dump-single-json "* ]]; then
+  printf '%s\n' '{"entries":[{"id":"abc123DEF45","title":"Fixture knowledge video","upload_date":"20260721"}]}'
+  exit 0
+fi
+for arg in "$@"; do
+  if [[ "$arg" == *"%(id)s.%(ext)s"* ]]; then
+    output="${arg//%(id)s/abc123DEF45}"
+    output="${output//%(ext)s/en-orig.vtt}"
+    mkdir -p "$(dirname "$output")"
+    cat > "$output" <<'VTT'
+WEBVTT
+
+00:00:00.000 --> 00:00:02.000
+Hello <b>world</b>.
+
+00:00:02.000 --> 00:00:04.000
+Hello <b>world</b>.
+
+00:00:04.000 --> 00:00:06.000
+Useful engineering insight.
+VTT
+    exit 0
+  fi
+done
+exit 0
