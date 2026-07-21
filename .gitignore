@@ -1,8 +1,21 @@
+# Runtime and secrets
 .env
-*.log
-*.cookie*
+*.cookie
+*.cookies.txt
 secrets/
-private-corpus/
-production-config/
+config/vault.json
+
+# Vault-generated content
+raw/
+data/clean_transcripts/
+wiki/sources/
+prompts/
+reports/
+logs/
+backups/
+data/manifest.csv
+
+# PowerShell and editor noise
+*.log
+.vscode/
 .DS_Store
-Thumbs.db
