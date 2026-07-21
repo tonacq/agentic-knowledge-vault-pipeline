@@ -1,0 +1,16 @@
+name: Smoke test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  fixture-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make the fixture yt-dlp executable
+        run: chmod +x tests/fake-ytdlp
+      - name: Run install and ingest smoke test
+        shell: pwsh
+        run: ./tests/Smoke-Test.ps1
