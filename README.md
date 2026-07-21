@@ -9,7 +9,7 @@ The repository now includes a sanitised, runnable starting point in [prototype/]
 - channel discovery with `yt-dlp`;
 - manifest-backed incremental state;
 - traceable source-note placeholders;
-- synthesis hand-off prompts;
+- clear synthesis hand-off state;
 - deterministic reports; and
 - safe report-only mode before any file changes.
 
