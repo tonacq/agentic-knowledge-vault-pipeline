@@ -1,6 +1,0 @@
-config/vault.json
-*.cookies.txt
-raw/
-data/clean_transcripts/
-reports/
-.test-vault/
