@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Wiki Agent Factory weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 23:00:00 Australia/Melbourne
+Persistent=true
+Unit=wiki-agent.service
+
+[Install]
+WantedBy=timers.target
