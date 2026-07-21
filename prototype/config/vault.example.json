@@ -1,7 +1,0 @@
-{
-  "channelUrl": "https://www.youtube.com/@example/videos",
-  "captionLanguage": "en-orig",
-  "maxVideos": 80,
-  "cookieFile": "",
-  "ytDlpPath": "yt-dlp"
-}
