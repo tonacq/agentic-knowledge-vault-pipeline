@@ -13,6 +13,12 @@ It is a generalised version of a live Oracle Ubuntu workflow. It does real work:
 
 No account credentials, cookies, Telegram tokens, VM paths, transcripts, or creator-specific data are included.
 
+## Origins and acknowledgement
+
+This project began as an operational extension of the **Karpathy-style Claude Code → Obsidian knowledge-vault workflow**, as demonstrated publicly by Andrej Karpathy and taught in practical form by Nate Herk. It takes that useful manual pattern—bring authorised source material into a structured vault, then use Claude Code to build durable knowledge—and makes it incremental, scheduled, traceable and quality-checked.
+
+Nate Herk’s public YouTube catalogue was the private proof corpus for the original live workflow. This repository contains neither that corpus nor any copied transcripts, and it is not affiliated with or endorsed by Andrej Karpathy or Nate Herk.
+
 ## What to install
 
 This package is for Ubuntu 24.04 on an Oracle VM (or another Linux host) and uses PowerShell 7.
