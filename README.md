@@ -1,56 +1,41 @@
-# Agentic Knowledge Vault Pipeline
+# Wiki Agent Factory
 
-An engineering-led, source-to-vault prototype for turning authorised material into a maintained Obsidian knowledge system.
+An installable PowerShell pipeline that turns a permitted YouTube channel into an Obsidian knowledge vault.
 
-## Runnable prototype
+It is a generalised version of a live Oracle Ubuntu workflow. It does real work:
 
-The repository now includes a sanitised, runnable starting point in [prototype/](prototype/):
+1. scans a configured channel with `yt-dlp`;
+2. records only unseen videos in `data/manifest.csv`;
+3. downloads permitted auto-captions, cleans VTT into plain text, and writes source notes;
+4. produces a bounded Claude Code synthesis hand-off;
+5. runs deterministic reconciliation QA;
+6. optionally backs up/synchronises the vault with rclone and sends a Telegram completion message.
 
-- channel discovery with `yt-dlp`;
-- manifest-backed incremental state;
-- traceable source-note placeholders;
-- clear synthesis hand-off state;
-- deterministic reports; and
-- safe report-only mode before any file changes.
+No account credentials, cookies, Telegram tokens, VM paths, transcripts, or creator-specific data are included.
 
-It is based on a private, operating prototype, but contains no transcripts, creator-specific corpus, credentials, cookies, personal details, server addresses or production paths.
+## What to install
 
-Start with [prototype/README.md](prototype/README.md).
+This package is for Ubuntu 24.04 on an Oracle VM (or another Linux host) and uses PowerShell 7.
 
-## Proven private prototype
+Required: `pwsh`, `yt-dlp`, `rclone`, `git`, `curl`.
 
-As at July 2026, the private prototype had:
+For AI synthesis: an authenticated `claude` CLI. The pipeline can still ingest, clean and QA a vault with `-SkipClaude`.
 
-- 295 catalogue items tracked by a manifest;
-- zero missing clean transcripts;
-- zero missing source pages;
-- zero pending synthesis items; and
-- successful incremental and zero-new-content runs.
+For scheduled runs: `systemd` (already present on Ubuntu).
 
-These figures describe the private prototype. Its corpus and derived vault are not distributed here.
+## Quick start
 
-## Architecture
-
-```mermaid
-flowchart TD
-    A["Authorised source material"] --> B["Acquire and prepare"]
-    B --> C["Create source pages"]
-    C --> D["LLM semantic synthesis"]
-    D --> E["Manifest reconciliation and QA"]
-    E --> F["Obsidian vault and inquiry"]
+```bash
+git clone https://github.com/tonacq/agentic-knowledge-vault-pipeline.git
+cd agentic-knowledge-vault-pipeline
+pwsh -File ./install-wiki-agent.ps1 -VaultRoot ~/wiki-agent/working/my-channel
+cp ./config/vault.example.json ~/wiki-agent/working/my-channel/config/vault.json
+# edit channel_url, creator, and optional Drive / proxy settings
+pwsh -File ./scripts/Run-WeeklyPipeline.ps1 -VaultRoot ~/wiki-agent/working/my-channel -SkipClaude
 ```
 
-The design separates deterministic processing from semantic judgement and uses the manifest to prove every item has completed the required stages.
+See [docs/INSTALL.md](docs/INSTALL.md) for exact Ubuntu commands, Google Drive configuration, Telegram setup and systemd scheduling.
 
-## Boundaries
+## Safety boundary
 
-This repository does not include:
-
-- third-party transcripts or a derived public vault;
-- credentials, cookies or production configuration;
-- private VM access or deployment paths; or
-- a scraper configured for an arbitrary third-party source.
-
-Use only material you own, are licensed to process, or have permission to use.
-
-See [architecture](docs/architecture.md), [results](docs/results-and-lessons.md), and [governance](docs/governance.md) for the project context.
+Use only with sources you are authorised to ingest. Cookie files, bot tokens and rclone configuration stay on the host and are excluded by `.gitignore`. This repository deliberately contains no copied creator transcripts or private vault material.
