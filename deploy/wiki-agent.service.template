@@ -1,0 +1,12 @@
+[Unit]
+Description=Wiki Agent Factory weekly pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=YOUR_LINUX_USER
+EnvironmentFile=YOUR_VAULT_PATH/secrets/telegram.env
+WorkingDirectory=YOUR_VAULT_PATH
+ExecStart=/usr/bin/pwsh -NoProfile -File YOUR_REPOSITORY_PATH/scripts/Run-Scheduled.ps1 -VaultRoot YOUR_VAULT_PATH
+TimeoutStartSec=6h
