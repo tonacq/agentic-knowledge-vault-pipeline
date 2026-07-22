@@ -1,6 +1,7 @@
 {
   "channel_url": "https://www.youtube.com/@example/videos",
   "creator": "Example Creator",
+  "creator_page": "example-creator",
   "max_videos": 80,
   "caption_languages": ["en-orig", "en"],
   "yt_dlp_path": "yt-dlp",
