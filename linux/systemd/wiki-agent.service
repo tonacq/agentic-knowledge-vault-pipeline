@@ -1,0 +1,14 @@
+[Unit]
+Description=Wiki-agent weekly pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=YOUR_LINUX_USER
+Group=YOUR_LINUX_GROUP
+Environment=HOME=/home/YOUR_LINUX_USER
+Environment=WIKI_AGENT_CONFIG=/etc/wiki-agent/wiki-agent.env
+ExecStart=YOUR_AGENT_ROOT/linux/bin/run-wiki-weekly.sh
+WorkingDirectory=YOUR_AGENT_ROOT
+TimeoutStartSec=6h
