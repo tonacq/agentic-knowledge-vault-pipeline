@@ -34,10 +34,10 @@ For scheduled runs: `systemd` (already present on Ubuntu).
 ```bash
 git clone https://github.com/tonacq/agentic-knowledge-vault-pipeline.git
 cd agentic-knowledge-vault-pipeline
-pwsh -File ./install-wiki-agent.ps1 -VaultRoot ~/wiki-agent/working/my-channel
+pwsh -File ./linux/install-linux-vault.ps1 -VaultRoot ~/wiki-agent/working/my-channel
 cp ./config/vault.example.json ~/wiki-agent/working/my-channel/config/vault.json
 # edit channel_url, creator, and optional Drive / proxy settings
-pwsh -File ./scripts/Run-WeeklyPipeline.ps1 -VaultRoot ~/wiki-agent/working/my-channel -SkipClaude
+pwsh -File ~/wiki-agent/working/my-channel/scripts/run_weekly_agentic_pipeline_v2_linux.ps1 -VaultRoot ~/wiki-agent/working/my-channel -SkipClaude
 ```
 
 See [docs/INSTALL.md](docs/INSTALL.md) for exact Ubuntu commands, Google Drive configuration, Telegram setup and systemd scheduling.
