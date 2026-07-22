@@ -670,7 +670,6 @@ Write-Host ""
 # -----------------------------
 
 $rows = @(Import-Csv -LiteralPath $ManifestPath)
-if ($rows.Count -eq 0) { throw "Manifest has no rows: $ManifestPath" }
 
 $requiredColumns = @(
     "video_id",
@@ -696,8 +695,11 @@ $requiredColumns = @(
     "synthesis_evidence",
     "synthesis_batch"
 )
-Ensure-Columns -Rows $rows -Columns $requiredColumns
-$columns = @($rows[0].PSObject.Properties.Name)
+$columns = $requiredColumns
+if ($rows.Count -gt 0) {
+    Ensure-Columns -Rows $rows -Columns $requiredColumns
+    $columns = @($rows[0].PSObject.Properties.Name)
+}
 
 $existingById = @{}
 foreach ($r in $rows) {
@@ -705,7 +707,7 @@ foreach ($r in $rows) {
     if (-not [string]::IsNullOrWhiteSpace($id)) { $existingById[$id] = $r }
 }
 
-$defaultChannel = Get-Field $rows[0] "channel"
+$defaultChannel = if ($rows.Count -gt 0) { Get-Field $rows[0] "channel" } else { $Creator }
 
 if ($Apply -and $PruneExistingDuplicateVttVariants -and -not $KeepDuplicateVttVariants) {
     Write-Info "Pruning existing duplicate VTT variants in raw/ using canonical transcript rule..."

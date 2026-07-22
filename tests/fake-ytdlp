@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ " $* " == *" --dump-single-json "* ]]; then
-  printf '%s\n' '{"entries":[{"id":"abc123DEF45","title":"Fixture knowledge video","upload_date":"20260721"}]}'
+if [[ " $* " == *" --dump-json "* ]]; then
+  printf '%s\n' '{"id":"abc123DEF45","title":"Fixture knowledge video","upload_date":"20260721","channel":"Fixture creator"}'
   exit 0
 fi
-for arg in "$@"; do
-  if [[ "$arg" == *"%(id)s.%(ext)s"* ]]; then
-    output="${arg//%(id)s/abc123DEF45}"
-    output="${output//%(ext)s/en-orig.vtt}"
-    mkdir -p "$(dirname "$output")"
-    cat > "$output" <<'VTT'
+for ((i=1; i<=$#; i++)); do
+  if [[ "${!i}" == "--paths" ]]; then
+    j=$((i + 1))
+    raw_dir="${!j}"
+    mkdir -p "$raw_dir"
+    cat > "$raw_dir/20260721_youtube_fixture-creator_fixture-knowledge-video_abc123DEF45.en-orig.vtt" <<'VTT'
 WEBVTT
 
 00:00:00.000 --> 00:00:02.000
@@ -21,6 +21,7 @@ Hello <b>world</b>.
 00:00:04.000 --> 00:00:06.000
 Useful engineering insight.
 VTT
+    printf '%s\n' '{"id":"abc123DEF45","title":"Fixture knowledge video","upload_date":"20260721","channel":"Fixture creator","webpage_url":"https://www.youtube.com/watch?v=abc123DEF45"}' > "$raw_dir/20260721_youtube_fixture-creator_fixture-knowledge-video_abc123DEF45.info.json"
     exit 0
   fi
 done

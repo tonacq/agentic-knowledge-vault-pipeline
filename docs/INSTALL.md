@@ -93,3 +93,24 @@ journalctl -u wiki-agent.service -n 100 --no-pager
 ## What is deliberately not automated
 
 The project does not download or distribute a creator's existing vault, transcripts, browser cookies, rclone configuration, Telegram credentials or Claude credentials. They are runtime data under your control.
+# Windows local acceptance test
+
+The Windows installer deploys the canonical VM-derived PowerShell pipeline into
+the selected vault. For the DWSIM restart test, keep the Factory source and
+vault separate:
+
+```powershell
+cd E:\\WikiAgent\\Factory
+.\\install-wiki-agent.ps1 -VaultRoot "E:\\KnowledgeVaults\\LLM_Wiki_DWSIM_Rev01"
+Copy-Item "E:\\KnowledgeVaults\\LLM_Wiki_DWSIM_Rev01\\config\\vault.example.json" "E:\\KnowledgeVaults\\LLM_Wiki_DWSIM_Rev01\\config\\vault.json"
+```
+
+Set the DWSIM channel and external cookie-file path in `config\\vault.json`.
+For the first acceptance run, do not invoke Claude:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File "E:\\KnowledgeVaults\\LLM_Wiki_DWSIM_Rev01\\scripts\\run_weekly_agentic_pipeline_v2.ps1" -VaultRoot "E:\\KnowledgeVaults\\LLM_Wiki_DWSIM_Rev01" -SkipClaude
+```
+
+The first run must use a fresh vault. Do not install over `Factory_Rev00` or
+`LLM_Wiki_DWSim_Rev00`.

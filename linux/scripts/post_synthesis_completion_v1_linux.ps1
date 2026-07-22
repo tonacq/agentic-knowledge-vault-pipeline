@@ -28,7 +28,7 @@
 param(
     [string]$VaultRoot = (Get-Location).Path,
     [string]$Batch = "",
-    [string]$QaScriptName = "qa_reconcile_sources_v3_linux.ps1",
+    [string]$QaScriptName = "qa_reconcile_sources_v3.ps1",
     [switch]$ReportOnly,
     [switch]$Apply
 )

@@ -13,8 +13,8 @@ Requires:
 [CmdletBinding()]
 param(
     [string]$VaultRoot = (Get-Location).Path,
-    [string]$UpdaterScriptName = "weekly_update_channel_wiki_v8_linux.ps1",
-    [string]$PostSynthesisScriptName = "post_synthesis_completion_v1_linux.ps1",
+    [string]$UpdaterScriptName = "weekly_update_channel_wiki_v8.ps1",
+    [string]$PostSynthesisScriptName = "post_synthesis_completion_v1.ps1",
     [ValidateSet("low", "medium", "high", "xhigh", "max")]
     [string]$ClaudeEffort = "high",
     [decimal]$MaxClaudeBudgetUsd = 10,
@@ -149,7 +149,7 @@ try {
     if (-not (Test-Path -LiteralPath $reportsDir)) {
         New-Item -ItemType Directory -Force -Path $reportsDir | Out-Null
     }
-    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+    if (-not $SkipClaude -and -not (Get-Command claude -ErrorAction SilentlyContinue)) {
         throw "Claude CLI was not found in PATH for the scheduled-task user."
     }
 
