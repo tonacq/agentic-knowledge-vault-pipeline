@@ -913,7 +913,7 @@ foreach ($row in $workRows) {
         Set-Field $row "transcript_status" "missing_transcript"
         Set-Field $row "clean_status" "blocked_missing_transcript"
         Set-Field $row "source_status" "blocked_missing_clean_transcript"
-        Set-Field $row "synthesis_status" "pending"
+        Set-Field $row "synthesis_status" "blocked_missing_transcript"
         $eventNotes.Add("no_vtt_found_after_download")
 
         $events.Add([pscustomobject]@{
