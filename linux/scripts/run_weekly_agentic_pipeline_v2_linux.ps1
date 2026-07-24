@@ -187,6 +187,16 @@ try {
         $promptValue = $promptValue.Trim().Trim("*").Replace("\", "/")
     }
 
+    # This run's own freshly-reported prompt (if any) is unambiguous and cannot be
+    # stale, unlike the historical prompts/ substring search used as a fallback below.
+    $freshPromptPath = $null
+    if (-not [string]::IsNullOrWhiteSpace($promptValue) -and $promptValue -ne "none") {
+        $candidateFreshPrompt = Convert-ToVaultPath -Root $VaultRoot -PathValue $promptValue
+        if (Test-Path -LiteralPath $candidateFreshPrompt) {
+            $freshPromptPath = $candidateFreshPrompt
+        }
+    }
+
     $manifestPath = Join-Path $VaultRoot "data/manifest.csv"
     $promptsDir = Join-Path $VaultRoot "prompts"
 
@@ -215,7 +225,7 @@ try {
             Get-ChildItem -LiteralPath $promptsDir `
                 -Filter "weekly_synthesis_*.md" `
                 -File |
-                Sort-Object Name
+                Sort-Object LastWriteTime -Descending
         )
 
         $missingPromptVideos = [System.Collections.Generic.List[string]]::new()
@@ -224,15 +234,32 @@ try {
             $videoId = ([string]$row.video_id).Trim()
             if ([string]::IsNullOrWhiteSpace($videoId)) { continue }
 
-            $matchingPrompt = $availablePrompts |
-                Where-Object {
-                    Select-String `
-                        -LiteralPath $_.FullName `
-                        -SimpleMatch `
-                        -Quiet `
-                        -Pattern $videoId
-                } |
-                Select-Object -First 1
+            $matchingPrompt = $null
+
+            # Prefer this run's own freshly-generated prompt when it covers this row --
+            # avoids the historical substring search (and its inherent staleness risk)
+            # entirely for the common case of a row synthesised in the same run.
+            if ($freshPromptPath -and (
+                Select-String -LiteralPath $freshPromptPath -SimpleMatch -Quiet -Pattern $videoId
+            )) {
+                $matchingPrompt = Get-Item -LiteralPath $freshPromptPath
+            }
+
+            if ($null -eq $matchingPrompt) {
+                # Fallback for rows pending from before this run (e.g. an interrupted
+                # prior run): search prompts/ history, newest match first, rather than
+                # oldest -- minimises the chance of reusing a stale, wrongly-scoped
+                # historical prompt.
+                $matchingPrompt = $availablePrompts |
+                    Where-Object {
+                        Select-String `
+                            -LiteralPath $_.FullName `
+                            -SimpleMatch `
+                            -Quiet `
+                            -Pattern $videoId
+                    } |
+                    Select-Object -First 1
+            }
 
             if ($null -eq $matchingPrompt) {
                 $missingPromptVideos.Add($videoId)
