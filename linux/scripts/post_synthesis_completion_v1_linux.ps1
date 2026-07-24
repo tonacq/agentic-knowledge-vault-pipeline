@@ -73,11 +73,19 @@ function Get-QaMetric([string[]]$Lines, [string]$Label) {
     return $null
 }
 
+function Get-QaCsvPath([string[]]$Lines) {
+    foreach ($line in $Lines) {
+        if ($line -match '^CSV:\s*(.+)$') { return $Matches[1].Trim() }
+    }
+    return $null
+}
+
 function Invoke-Qa([string]$ScriptPath, [bool]$UseApply) {
     $arguments = @(
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
-        '-File', $ScriptPath
+        '-File', $ScriptPath,
+        '-VaultRoot', $VaultRoot
     )
     if ($UseApply) { $arguments += '-Apply' }
 
@@ -89,6 +97,7 @@ function Invoke-Qa([string]$ScriptPath, [bool]$UseApply) {
     return [pscustomobject]@{
         ExitCode = $exitCode
         Output = $output
+        CsvPath = Get-QaCsvPath -Lines $output
         MissingSourcePages = Get-QaMetric -Lines $output -Label 'Missing source pages'
         MissingCleanTranscripts = Get-QaMetric -Lines $output -Label 'Missing clean transcripts'
         TemplateArtefacts = Get-QaMetric -Lines $output -Label 'Rows with template artefacts'
@@ -99,12 +108,11 @@ function Invoke-Qa([string]$ScriptPath, [bool]$UseApply) {
     }
 }
 
-function Test-QaClean($QaResult) {
+function Test-QaClean($QaResult, [int]$UnexpectedMissingCount = 0) {
     if ($QaResult.ExitCode -ne 0) { return $false }
+    if ($UnexpectedMissingCount -ne 0) { return $false }
 
     $metrics = @(
-        $QaResult.MissingSourcePages,
-        $QaResult.MissingCleanTranscripts,
         $QaResult.TemplateArtefacts,
         $QaResult.StalePendingText,
         $QaResult.MissingEvidencePaths,
@@ -116,6 +124,26 @@ function Test-QaClean($QaResult) {
         if ($null -eq $metric -or $metric -ne 0) { return $false }
     }
     return $true
+}
+
+function Get-UnexpectedMissingRows($QaResult, [string]$BlockedStatusValue, [scriptblock]$FieldGetter) {
+    # Cross-checks the QA script's per-row CSV (video_id, synthesis_status, source_exists,
+    # clean_exists) rather than trusting that the aggregate MissingSourcePages /
+    # MissingCleanTranscripts counts are fully explained by known-blocked rows. A row is only
+    # tolerated here if its own synthesis_status is exactly $BlockedStatusValue; any other row
+    # with a missing source page or clean transcript is treated as a genuine defect.
+    if (-not $QaResult.CsvPath -or -not (Test-Path -LiteralPath $QaResult.CsvPath)) {
+        # Fail safe: if the QA detail CSV cannot be located, do not silently tolerate anything.
+        return @([pscustomobject]@{ video_id = '(unknown - QA CSV path not found)' })
+    }
+
+    $qaRows = @(Import-Csv -LiteralPath $QaResult.CsvPath)
+    return @($qaRows | Where-Object {
+        $status = (& $FieldGetter $_ 'synthesis_status').Trim().ToLowerInvariant()
+        $sourceOk = ([string]$_.source_exists) -eq 'True'
+        $cleanOk = ([string]$_.clean_exists) -eq 'True'
+        ($status -ne $BlockedStatusValue) -and (-not $sourceOk -or -not $cleanOk)
+    })
 }
 
 function Write-CompletionReport(
@@ -283,14 +311,25 @@ if ($Apply -and $manifestReady) {
     Write-Warn 'QA fixes were not applied because the batch manifest state is incomplete.'
 }
 
-$qaClean = Test-QaClean $finalQa
+$blockedStatusValue = 'blocked_missing_transcript'
+$unexpectedMissingRows = Get-UnexpectedMissingRows -QaResult $finalQa -BlockedStatusValue $blockedStatusValue -FieldGetter ${function:Get-Field}
+
+$qaClean = Test-QaClean -QaResult $finalQa -UnexpectedMissingCount $unexpectedMissingRows.Count
 $status = 'ACTION REQUIRED'
 $notes = 'Review the incomplete manifest rows or QA exceptions listed above, then rerun this script.'
 $exitCode = 2
 
+if ($unexpectedMissingRows.Count -gt 0) {
+    $notes = 'Rows with an unexplained missing source page or clean transcript (synthesis_status other than ''blocked_missing_transcript''): ' + (($unexpectedMissingRows | ForEach-Object { $_.video_id }) -join ', ')
+}
+
 if ($manifestReady -and $qaClean) {
     $status = 'BATCH COMPLETE'
     $notes = 'All rows in the selected synthesis batch are included, synthesis evidence is present, and final source QA is clean.'
+    $expectedBlockedCount = @($rows | Where-Object { (Get-Field $_ 'synthesis_status').Trim().ToLowerInvariant() -eq $blockedStatusValue }).Count
+    if ($expectedBlockedCount -gt 0) {
+        $notes += (" {0} vault row(s) with synthesis_status ''blocked_missing_transcript'' were excluded from the QA-clean gate after per-row verification that each one (and only those rows) is missing its source page and/or clean transcript." -f $expectedBlockedCount)
+    }
     $exitCode = 0
 }
 

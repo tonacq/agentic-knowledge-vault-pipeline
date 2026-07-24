@@ -335,6 +335,7 @@ try {
 
             & pwsh -NoProfile -ExecutionPolicy Bypass `
                 -File $postPath `
+                -VaultRoot $VaultRoot `
                 -Apply
 
             $postExit = $LASTEXITCODE
