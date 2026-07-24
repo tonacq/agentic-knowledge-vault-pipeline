@@ -156,7 +156,7 @@ function Replace-LiteralToken([string]$Text, [string]$Token, [string]$Value) {
     return $Text.Replace($Token, $Value)
 }
 
-function Fix-SourceText([string]$Text, $Row, [string]$CleanRel, [string]$SourceRel) {
+function Fix-SourceText([string]$Text, $Row, [string]$CleanRel, [string]$SourceRel, [switch]$PreserveSynthesisStatus) {
     $videoId = Get-Field $Row 'video_id'
     $title = Get-Field $Row 'title'
     $url = Get-Field $Row 'url'
@@ -192,12 +192,20 @@ function Fix-SourceText([string]$Text, $Row, [string]$CleanRel, [string]$SourceR
     }
 
     # Body status lines. Keep these simple and deterministic.
-    $new = [regex]::Replace($new, '(?im)^(\s*-\s*Synthesis status:\s*).+$', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Groups[1].Value + $synthStatus })
-    $new = [regex]::Replace($new, '(?im)^(\s*Synthesis status:\s*).+$', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Groups[1].Value + $synthStatus })
+    # Skipped when $PreserveSynthesisStatus is set -- this indicates the page's own text
+    # already shows a more-complete synthesis_status than the manifest currently records
+    # (the signature of an interrupted synthesis run), and overwriting it here would erase
+    # the only on-page trace that synthesis content already exists.
+    if (-not $PreserveSynthesisStatus) {
+        $new = [regex]::Replace($new, '(?im)^(\s*-\s*Synthesis status:\s*).+$', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Groups[1].Value + $synthStatus })
+        $new = [regex]::Replace($new, '(?im)^(\s*Synthesis status:\s*).+$', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Groups[1].Value + $synthStatus })
+    }
 
     # Frontmatter and loose YAML-style status lines.
     $new = [regex]::Replace($new, '(?im)^(\s*source_status:\s*).+$', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Groups[1].Value + '"' + $sourceStatus + '"' })
-    $new = [regex]::Replace($new, '(?im)^(\s*synthesis_status:\s*).+$', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Groups[1].Value + '"' + $synthStatus + '"' })
+    if (-not $PreserveSynthesisStatus) {
+        $new = [regex]::Replace($new, '(?im)^(\s*synthesis_status:\s*).+$', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Groups[1].Value + '"' + $synthStatus + '"' })
+    }
 
     $new = Set-Or-AddYamlField $new 'video_id' $videoId
     $new = Set-Or-AddYamlField $new 'title' $title
@@ -206,7 +214,9 @@ function Fix-SourceText([string]$Text, $Row, [string]$CleanRel, [string]$SourceR
     $new = Set-Or-AddYamlField $new 'clean_transcript_file' $CleanRel
     $new = Set-Or-AddYamlField $new 'source_file' $SourceRel
     $new = Set-Or-AddYamlField $new 'source_status' $sourceStatus
-    $new = Set-Or-AddYamlField $new 'synthesis_status' $synthStatus
+    if (-not $PreserveSynthesisStatus) {
+        $new = Set-Or-AddYamlField $new 'synthesis_status' $synthStatus
+    }
 
     return $new
 }
@@ -324,6 +334,7 @@ $sourceMissing = 0
 $cleanMissing = 0
 $placeholderRows = 0
 $stalePendingRows = 0
+$interruptedSynthesisRows = 0
 $evidenceMissingRows = 0
 $changedRows = 0
 $manifestPathFixRows = 0
@@ -369,6 +380,7 @@ foreach ($row in $rows) {
 
     $placeholderCount = 0
     $stalePending = $false
+    $possibleInterruptedSynthesis = $false
     $changed = $false
     $manifestPathFix = $false
 
@@ -383,7 +395,16 @@ foreach ($row in $rows) {
             $stalePendingRows++
         }
 
-        $fixed = Fix-SourceText -Text $text -Row $row -CleanRel $cleanRel -SourceRel $sourceRel
+        # Reverse-direction check: the page's own text already claims synthesis is
+        # included, but the manifest does not (yet) agree. This is the signature of an
+        # interrupted synthesis run (content written, manifest update never reached) --
+        # do not silently downgrade the page's status text in this case; flag it instead.
+        if ($synthStatus -ne 'included' -and ($text -match '(?im)^\s*synthesis_status:\s*"?included"?\s*$')) {
+            $possibleInterruptedSynthesis = $true
+            $interruptedSynthesisRows++
+        }
+
+        $fixed = Fix-SourceText -Text $text -Row $row -CleanRel $cleanRel -SourceRel $sourceRel -PreserveSynthesisStatus:$possibleInterruptedSynthesis
 
         if ($fixed -ne $text) {
             $changed = $true
@@ -424,6 +445,7 @@ foreach ($row in $rows) {
         synthesis_status = $synthStatus
         placeholder_count = $placeholderCount
         stale_pending_text = $stalePending
+        possible_interrupted_synthesis = $possibleInterruptedSynthesis
         missing_synthesis_evidence = ($missingEvidence -join ' | ')
         would_change_source = $changed
         source_found_by_fallback = ($sourceRel -ne $sourceRelOriginal -and -not [string]::IsNullOrWhiteSpace($sourceRel))
@@ -447,6 +469,7 @@ $topIssues = $results |
     Where-Object {
         $_.placeholder_count -gt 0 -or
         $_.stale_pending_text -eq $true -or
+        $_.possible_interrupted_synthesis -eq $true -or
         $_.source_exists -eq $false -or
         $_.clean_exists -eq $false -or
         $_.missing_synthesis_evidence -ne '' -or
@@ -475,6 +498,7 @@ Manifest path updates: $manifestMode
 | Missing clean transcript files | $cleanMissing |
 | Rows with template artefacts | $placeholderRows |
 | Rows with stale pending synthesis text | $stalePendingRows |
+| Rows with possible interrupted synthesis (page says included, manifest does not) | $interruptedSynthesisRows |
 | Rows with missing synthesis evidence paths | $evidenceMissingRows |
 | Source pages that would change / changed | $changedRows |
 | Source pages found by fallback | $sourceFallbackRows |
@@ -501,12 +525,12 @@ CSV detail report:
 
 ## Top issue rows
 
-| video_id | source_exists | clean_exists | synthesis_status | placeholder_count | stale_pending_text | source_fallback | clean_fallback | would_change_source |
-|---|---:|---:|---|---:|---:|---:|---:|---:|
+| video_id | source_exists | clean_exists | synthesis_status | placeholder_count | stale_pending_text | possible_interrupted_synthesis | source_fallback | clean_fallback | would_change_source |
+|---|---:|---:|---|---:|---:|---:|---:|---:|---:|
 "@
 
 foreach ($issue in $topIssues) {
-    $md += "`n| $(Convert-ToMarkdownSafe $issue.video_id) | $($issue.source_exists) | $($issue.clean_exists) | $(Convert-ToMarkdownSafe $issue.synthesis_status) | $($issue.placeholder_count) | $($issue.stale_pending_text) | $($issue.source_found_by_fallback) | $($issue.clean_found_by_fallback) | $($issue.would_change_source) |"
+    $md += "`n| $(Convert-ToMarkdownSafe $issue.video_id) | $($issue.source_exists) | $($issue.clean_exists) | $(Convert-ToMarkdownSafe $issue.synthesis_status) | $($issue.placeholder_count) | $($issue.stale_pending_text) | $($issue.possible_interrupted_synthesis) | $($issue.source_found_by_fallback) | $($issue.clean_found_by_fallback) | $($issue.would_change_source) |"
 }
 
 $md += @"
@@ -544,6 +568,7 @@ Write-Host "Missing source pages: $sourceMissing"
 Write-Host "Missing clean transcripts: $cleanMissing"
 Write-Host "Rows with template artefacts: $placeholderRows"
 Write-Host "Rows with stale pending synthesis text: $stalePendingRows"
+Write-Host "Rows with possible interrupted synthesis: $interruptedSynthesisRows"
 Write-Host "Rows with missing synthesis evidence paths: $evidenceMissingRows"
 Write-Host "Source pages that would change / changed: $changedRows"
 Write-Host "Source pages found by fallback: $sourceFallbackRows"
