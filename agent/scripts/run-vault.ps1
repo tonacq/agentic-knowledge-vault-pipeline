@@ -1,0 +1,146 @@
+<#
+.SYNOPSIS
+Runs the full WikiAgent pipeline for exactly one vault. This is the single entry point
+the scheduler (or a human) calls; it never touches any vault other than -VaultRoot.
+
+.DESCRIPTION
+Stage order (matches the locked architecture spec, section 5):
+  1. Acquire vault lock (fails fast if another run is already in progress for this vault)
+  2. ingest-youtube.ps1      (unless -SkipYoutube)
+  3. ingest-documents.ps1    (unless -SkipDocuments)
+  4. create-source-pages.ps1
+  5. run-claude-synthesis.ps1 (unless -SkipClaude)
+  6. run-qa.ps1              (deterministic reconciliation; always runs, even after a
+                                partial/interrupted run above)
+  7. backup-vault.ps1        (unless -SkipBackup)
+  8. release lock, write run result
+
+.EXAMPLE
+pwsh agent/scripts/run-vault.ps1 -VaultRoot vaults/DWSIM -JobType full
+
+.EXAMPLE
+pwsh agent/scripts/run-vault.ps1 -VaultRoot vaults/DWSIM -JobType lint-review -ReportOnly
+#>
+
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)][string]$VaultRoot,
+    [ValidateSet('full', 'lint-review')][string]$JobType = 'full',
+    [switch]$ReportOnly,
+    [switch]$SkipYoutube,
+    [switch]$SkipDocuments,
+    [switch]$SkipClaude,
+    [switch]$SkipBackup
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$VaultRoot = (Resolve-Path -LiteralPath $VaultRoot).Path
+$AgentRoot = Split-Path -Parent $PSScriptRoot   # .../agent
+$VaultName = Split-Path -Leaf $VaultRoot
+
+# --- Locking -----------------------------------------------------------------
+# Locks are agent-owned but vault-scoped, so two different vaults can run concurrently
+# while the same vault can never overlap itself. Stale locks (owner process no longer
+# running) are detected and cleared rather than left to block forever.
+$lockDir = Join-Path $AgentRoot 'scheduling/locks'
+New-Item -ItemType Directory -Force -Path $lockDir | Out-Null
+$lockFile = Join-Path $lockDir "$VaultName.lock"
+
+function Test-StaleLock($path) {
+    if (-not (Test-Path -LiteralPath $path)) { return $false }
+    try {
+        $pid_recorded = [int](Get-Content -LiteralPath $path -Raw)
+        return -not (Get-Process -Id $pid_recorded -ErrorAction SilentlyContinue)
+    } catch { return $true }  # unreadable lock file counts as stale
+}
+
+if (Test-Path -LiteralPath $lockFile) {
+    if (Test-StaleLock $lockFile) {
+        Write-Warning "Clearing stale lock for vault '$VaultName'."
+        Remove-Item -LiteralPath $lockFile -Force
+    } else {
+        & (Join-Path $AgentRoot 'scripts/send-notification.ps1') -VaultRoot $VaultRoot -Event Blocked
+        throw "Vault '$VaultName' already has a run in progress (lock: $lockFile). Aborting."
+    }
+}
+$PID | Out-File -LiteralPath $lockFile -Encoding ascii -Force
+
+$runStart = Get-Date
+$stageResults = [ordered]@{}
+
+function Invoke-Stage($name, $scriptPath, $extraArgs) {
+    if (-not (Test-Path -LiteralPath $scriptPath)) {
+        $stageResults[$name] = 'SKIPPED (script not present)'
+        return
+    }
+    Write-Host "=== Stage: $name ==="
+    try {
+        & $scriptPath -VaultRoot $VaultRoot @extraArgs
+        $stageResults[$name] = 'OK'
+    } catch {
+        $stageResults[$name] = "FAILED: $($_.Exception.Message)"
+        Write-Warning "Stage '$name' failed: $($_.Exception.Message)"
+        # Do not rethrow: QA must still run so partial progress is reconciled safely.
+    }
+}
+
+try {
+    # Pull-before-run, per the proven VM pattern (Drive is canonical, vault dir is a working copy).
+    Invoke-Stage 'sync-vault (pull)' (Join-Path $AgentRoot 'scripts/sync-vault.ps1') @('-Direction', 'Pull')
+
+    if ($JobType -eq 'lint-review') {
+        # Report-only vault-wide analysis. No ingestion, no synthesis writes beyond the
+        # lint report itself. See vault-local config/claude.md for the exact contract.
+        Invoke-Stage 'run-claude-synthesis (lint-review)' (Join-Path $AgentRoot 'scripts/run-claude-synthesis.ps1') @('-LintReview')
+    } else {
+        if (-not $SkipYoutube)   { Invoke-Stage 'ingest-youtube'       (Join-Path $AgentRoot 'scripts/ingest-youtube.ps1')       @() }
+        if (-not $SkipDocuments) { Invoke-Stage 'ingest-documents'     (Join-Path $AgentRoot 'scripts/ingest-documents.ps1')     @() }
+        Invoke-Stage 'create-source-pages' (Join-Path $AgentRoot 'scripts/create-source-pages.ps1') @()
+
+        if (-not $SkipClaude -and -not $ReportOnly) {
+            Invoke-Stage 'run-claude-synthesis' (Join-Path $AgentRoot 'scripts/run-claude-synthesis.ps1') @()
+        }
+
+        # QA always runs, even if an earlier stage failed or Claude was interrupted.
+        # It is the only stage permitted to update synthesis_status in the manifest, and
+        # it must never downgrade an 'included' row back to 'pending' on re-run.
+        Invoke-Stage 'run-qa' (Join-Path $AgentRoot 'scripts/run-qa.ps1') @()
+
+        if (-not $SkipBackup -and -not $ReportOnly) {
+            Invoke-Stage 'backup-vault' (Join-Path $AgentRoot 'scripts/backup-vault.ps1') @()
+        }
+        if (-not $ReportOnly) {
+            # Push-after-run: only successful runs get pushed back to the canonical Drive copy.
+            Invoke-Stage 'sync-vault (push)' (Join-Path $AgentRoot 'scripts/sync-vault.ps1') @('-Direction', 'Push')
+        }
+    }
+} finally {
+    Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
+}
+
+$runEnd = Get-Date
+$result = [ordered]@{
+    vault      = $VaultName
+    jobType    = $JobType
+    startedUtc = $runStart.ToUniversalTime().ToString('o')
+    endedUtc   = $runEnd.ToUniversalTime().ToString('o')
+    stages     = $stageResults
+}
+
+$logsDir = Join-Path $VaultRoot 'logs'
+New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+$resultFile = Join-Path $logsDir "run_$($runStart.ToString('yyyyMMdd_HHmmss')).json"
+$result | ConvertTo-Json -Depth 5 | Out-File -LiteralPath $resultFile -Encoding utf8
+
+$anyFailed = $stageResults.Values | Where-Object { $_ -like 'FAILED*' }
+if ($anyFailed) {
+    & (Join-Path $AgentRoot 'scripts/send-notification.ps1') -VaultRoot $VaultRoot -Event Failed -ExitCode '1' -LogFile $resultFile
+    Write-Host "PIPELINE_RESULT: PARTIAL_FAILURE ($VaultName)"
+    exit 1
+} else {
+    & (Join-Path $AgentRoot 'scripts/send-notification.ps1') -VaultRoot $VaultRoot -Event Success -LogFile $resultFile
+    Write-Host "PIPELINE_RESULT: SUCCESS ($VaultName)"
+    exit 0
+}

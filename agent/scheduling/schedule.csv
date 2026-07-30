@@ -1,0 +1,2 @@
+vault_name,job_type,day_of_week,time_utc,enabled
+_template,full,Sun,09:00,false
