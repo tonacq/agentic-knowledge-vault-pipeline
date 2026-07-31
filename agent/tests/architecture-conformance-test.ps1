@@ -124,7 +124,7 @@ if (Test-Path -LiteralPath $vaultRoot -PathType Container) {
 if (-not $SkipContentScan) {
     $obsoleteTerms = @('engine/', 'top-level runtime/', 'baseline/vm-live', 'provenance/')
     Get-ChildItem -LiteralPath $resolvedRoot -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Extension -in '.ps1', '.sh', '.py', '.md', '.json', '.csv' -and $_.FullName -notmatch '\.git[/\\]' } |
+        Where-Object { $_.Extension -in '.ps1', '.sh', '.py', '.md', '.json', '.csv' -and $_.FullName -notmatch '\.git[/\\]' -and $_.FullName -ne $PSCommandPath } |
         ForEach-Object {
             $text = Get-Content -LiteralPath $_.FullName -Raw -ErrorAction SilentlyContinue
             if ($text -and $text -match 'engine/scripts|top-level runtime|/baseline/|/provenance/') {
