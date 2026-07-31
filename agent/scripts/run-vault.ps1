@@ -36,6 +36,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Non-interactive invocations (ssh, cron) don't source ~/.bashrc, so ~/.local/bin
+# (yt-dlp, claude) is missing from PATH unless we add it here explicitly.
+$localBin = Join-Path $HOME '.local/bin'
+if ($env:PATH -notlike "*$localBin*") {
+    $env:PATH = "${localBin}:$env:PATH"
+}
+
 $VaultRoot = (Resolve-Path -LiteralPath $VaultRoot).Path
 $AgentRoot = Split-Path -Parent $PSScriptRoot   # .../agent
 $VaultName = Split-Path -Leaf $VaultRoot
@@ -88,12 +95,12 @@ function Invoke-Stage($name, $scriptPath, $extraArgs) {
 
 try {
     # Pull-before-run, per the proven VM pattern (Drive is canonical, vault dir is a working copy).
-    Invoke-Stage 'sync-vault (pull)' (Join-Path $AgentRoot 'scripts/sync-vault.ps1') @('-Direction', 'Pull')
+    Invoke-Stage 'sync-vault (pull)' (Join-Path $AgentRoot 'scripts/sync-vault.ps1') @{ Direction = 'Pull' }
 
     if ($JobType -eq 'lint-review') {
         # Report-only vault-wide analysis. No ingestion, no synthesis writes beyond the
         # lint report itself. See vault-local config/claude.md for the exact contract.
-        Invoke-Stage 'run-claude-synthesis (lint-review)' (Join-Path $AgentRoot 'scripts/run-claude-synthesis.ps1') @('-LintReview')
+        Invoke-Stage 'run-claude-synthesis (lint-review)' (Join-Path $AgentRoot 'scripts/run-claude-synthesis.ps1') @{ LintReview = $true }
     } else {
         if (-not $SkipYoutube)   { Invoke-Stage 'ingest-youtube'       (Join-Path $AgentRoot 'scripts/ingest-youtube.ps1')       @() }
         if (-not $SkipDocuments) { Invoke-Stage 'ingest-documents'     (Join-Path $AgentRoot 'scripts/ingest-documents.ps1')     @() }
@@ -113,7 +120,7 @@ try {
         }
         if (-not $ReportOnly) {
             # Push-after-run: only successful runs get pushed back to the canonical Drive copy.
-            Invoke-Stage 'sync-vault (push)' (Join-Path $AgentRoot 'scripts/sync-vault.ps1') @('-Direction', 'Push')
+            Invoke-Stage 'sync-vault (push)' (Join-Path $AgentRoot 'scripts/sync-vault.ps1') @{ Direction = 'Push' }
         }
     }
 } finally {

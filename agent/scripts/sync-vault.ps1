@@ -44,3 +44,6 @@ if ($Direction -eq 'Pull') {
     Write-Host "Pushing vault state to $remote ..."
     & rclone copy $VaultRoot $remote --exclude '/config/prompts/**' --progress
 }
+if ($LASTEXITCODE -ne 0) {
+    throw "rclone $Direction failed for $remote (exit code $LASTEXITCODE)"
+}

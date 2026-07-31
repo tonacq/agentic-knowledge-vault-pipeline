@@ -50,6 +50,9 @@ if ($ReportOnly) {
 }
 
 $scanResults = & $ytdlp @ytArgs 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw "yt-dlp channel scan failed (exit code $LASTEXITCODE): $($scanResults -join ' ')"
+}
 $scanned = @($scanResults | Where-Object { $_ -match '\|' })
 
 $manifest = @()
@@ -85,6 +88,7 @@ foreach ($line in $candidates) {
     $status = 'downloaded'
     try {
         & $ytdlp @dlArgs 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "yt-dlp exited with code $LASTEXITCODE for $id" }
 
         # Canonical caption selection: prefer en-orig, else en; delete the other variant.
         $preferred = $null

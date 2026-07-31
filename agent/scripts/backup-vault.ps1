@@ -45,6 +45,9 @@ Get-ChildItem -LiteralPath $archiveDir -Filter "${vaultName}_backup_*.zip" |
 if ($config.backup.remote -and $config.backup.destination) {
     if (Get-Command rclone -ErrorAction SilentlyContinue) {
         & rclone copy $backupPath "$($config.backup.remote):$($config.backup.destination)" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "rclone copy failed for backup destination $($config.backup.remote):$($config.backup.destination) (exit code $LASTEXITCODE)"
+        }
         Write-Host "Backup synced to $($config.backup.remote):$($config.backup.destination)"
     } else {
         Write-Warning "rclone not found on PATH; local backup only ($backupPath)."

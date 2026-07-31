@@ -48,6 +48,7 @@ make no other changes.
     Push-Location $VaultRoot
     try {
         & claude -p (Get-Content -LiteralPath $lintPrompt -Raw)
+        if ($LASTEXITCODE -ne 0) { throw "claude CLI exited with code $LASTEXITCODE (lint-review)" }
     } finally { Pop-Location }
     return
 }
@@ -85,6 +86,7 @@ Write-Host "Invoking Claude Code for batch $batchId ($($pending.Count) sources).
 Push-Location $VaultRoot
 try {
     & claude -p (Get-Content -LiteralPath $promptFile -Raw)
+    if ($LASTEXITCODE -ne 0) { throw "claude CLI exited with code $LASTEXITCODE (batch $batchId)" }
 } finally { Pop-Location }
 
 Write-Host "Synthesis invocation complete for $batchId. Manifest reconciliation happens in run-qa.ps1."
