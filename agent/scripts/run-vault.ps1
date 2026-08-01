@@ -7,13 +7,15 @@ the scheduler (or a human) calls; it never touches any vault other than -VaultRo
 Stage order (matches the locked architecture spec, section 5):
   1. Acquire vault lock (fails fast if another run is already in progress for this vault)
   2. ingest-youtube.ps1      (unless -SkipYoutube)
-  3. ingest-documents.ps1    (unless -SkipDocuments)
-  4. create-source-pages.ps1
-  5. run-claude-synthesis.ps1 (unless -SkipClaude)
-  6. run-qa.ps1              (deterministic reconciliation; always runs, even after a
+  3. clean-transcripts.ps1   (unless -SkipClean; converts raw .vtt captions to clean text
+                                and sets clean_status so create-source-pages.ps1 can act)
+  4. ingest-documents.ps1    (unless -SkipDocuments)
+  5. create-source-pages.ps1
+  6. run-claude-synthesis.ps1 (unless -SkipClaude)
+  7. run-qa.ps1              (deterministic reconciliation; always runs, even after a
                                 partial/interrupted run above)
-  7. backup-vault.ps1        (unless -SkipBackup)
-  8. release lock, write run result
+  8. backup-vault.ps1        (unless -SkipBackup)
+  9. release lock, write run result
 
 .EXAMPLE
 pwsh agent/scripts/run-vault.ps1 -VaultRoot vaults/DWSIM -JobType full
@@ -28,6 +30,7 @@ param(
     [ValidateSet('full', 'lint-review')][string]$JobType = 'full',
     [switch]$ReportOnly,
     [switch]$SkipYoutube,
+    [switch]$SkipClean,
     [switch]$SkipDocuments,
     [switch]$SkipClaude,
     [switch]$SkipBackup
@@ -103,6 +106,7 @@ try {
         Invoke-Stage 'run-claude-synthesis (lint-review)' (Join-Path $AgentRoot 'scripts/run-claude-synthesis.ps1') @{ LintReview = $true }
     } else {
         if (-not $SkipYoutube)   { Invoke-Stage 'ingest-youtube'       (Join-Path $AgentRoot 'scripts/ingest-youtube.ps1')       @() }
+        if (-not $SkipClean)     { Invoke-Stage 'clean-transcripts'    (Join-Path $AgentRoot 'scripts/clean-transcripts.ps1')    @() }
         if (-not $SkipDocuments) { Invoke-Stage 'ingest-documents'     (Join-Path $AgentRoot 'scripts/ingest-documents.ps1')     @() }
         Invoke-Stage 'create-source-pages' (Join-Path $AgentRoot 'scripts/create-source-pages.ps1') @()
 
@@ -141,13 +145,31 @@ New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
 $resultFile = Join-Path $logsDir "run_$($runStart.ToString('yyyyMMdd_HHmmss')).json"
 $result | ConvertTo-Json -Depth 5 | Out-File -LiteralPath $resultFile -Encoding utf8
 
+# Read run-qa.ps1's structured result (if it ran this pass) to tell a real-work Success
+# apart from a nothing-to-do NoChange - both look identical from stage OK/FAILED status
+# alone. Missing/unreadable file (e.g. lint-review job, which never invokes run-qa.ps1)
+# defaults to 0, i.e. NoChange, rather than risking a stale count from an earlier run.
+$qaResultPath = Join-Path $VaultRoot 'working/temp/qa-result.json'
+$qaRowsChanged = 0
+if (Test-Path -LiteralPath $qaResultPath) {
+    try {
+        $qaRowsChanged = [int](Get-Content -LiteralPath $qaResultPath -Raw | ConvertFrom-Json).rowsChanged
+    } catch {
+        Write-Warning "Could not parse qa-result.json for change detection: $($_.Exception.Message)"
+    }
+}
+
 $anyFailed = $stageResults.Values | Where-Object { $_ -like 'FAILED*' }
 if ($anyFailed) {
     & (Join-Path $AgentRoot 'scripts/send-notification.ps1') -VaultRoot $VaultRoot -Event Failed -ExitCode '1' -LogFile $resultFile
     Write-Host "PIPELINE_RESULT: PARTIAL_FAILURE ($VaultName)"
     exit 1
-} else {
+} elseif ($qaRowsChanged -gt 0) {
     & (Join-Path $AgentRoot 'scripts/send-notification.ps1') -VaultRoot $VaultRoot -Event Success -LogFile $resultFile
     Write-Host "PIPELINE_RESULT: SUCCESS ($VaultName)"
+    exit 0
+} else {
+    & (Join-Path $AgentRoot 'scripts/send-notification.ps1') -VaultRoot $VaultRoot -Event NoChange -LogFile $resultFile
+    Write-Host "PIPELINE_RESULT: NO_CHANGE ($VaultName)"
     exit 0
 }
