@@ -47,7 +47,7 @@ make no other changes.
 
     Push-Location $VaultRoot
     try {
-        & claude -p (Get-Content -LiteralPath $lintPrompt -Raw)
+        & claude -p (Get-Content -LiteralPath $lintPrompt -Raw) --permission-mode acceptEdits
         if ($LASTEXITCODE -ne 0) { throw "claude CLI exited with code $LASTEXITCODE (lint-review)" }
     } finally { Pop-Location }
     return
@@ -85,7 +85,7 @@ Do not edit working/manifest.csv. run-qa.ps1 will reconcile it from your result 
 Write-Host "Invoking Claude Code for batch $batchId ($($pending.Count) sources)..."
 Push-Location $VaultRoot
 try {
-    & claude -p (Get-Content -LiteralPath $promptFile -Raw)
+    & claude -p (Get-Content -LiteralPath $promptFile -Raw) --permission-mode acceptEdits
     if ($LASTEXITCODE -ne 0) { throw "claude CLI exited with code $LASTEXITCODE (batch $batchId)" }
 } finally { Pop-Location }
 

@@ -11,7 +11,7 @@ set -Eeuo pipefail
 
 # Explicit PATH — matches the proven production wrapper (run_nate_herk_weekly.sh),
 # needed because systemd services don't inherit an interactive login PATH.
-export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
 AGENT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WIKIAGENT_ROOT="$(cd "${AGENT_ROOT}/.." && pwd)"

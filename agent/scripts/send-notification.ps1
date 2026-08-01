@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
-Sends a Telegram notification for one of three events, matching the proven pattern
+Sends a Telegram notification for one of four events, matching the proven pattern
 from run_nate_herk_weekly.sh: a run that couldn't start (lock contention), a run that
-failed mid-pipeline, or a run that completed successfully.
+failed mid-pipeline, a run that completed with real synthesis work done, or a run that
+completed with nothing to do.
 
 .DESCRIPTION
 Credentials: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID. Resolved in this order:
@@ -19,7 +20,7 @@ Never throws — a notification failure must never fail the pipeline run itself.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$VaultRoot,
-    [Parameter(Mandatory = $true)][ValidateSet('Blocked', 'Failed', 'Success')][string]$Event,
+    [Parameter(Mandatory = $true)][ValidateSet('Blocked', 'Failed', 'Success', 'NoChange')][string]$Event,
     [string]$ExitCode,
     [string]$LogFile
 )
@@ -60,6 +61,9 @@ $message = switch ($Event) {
     }
     'Success' {
         "Wiki pipeline completed successfully for ${vaultName}. Time: $now. Log: $LogFile"
+    }
+    'NoChange' {
+        "Wiki pipeline ran for ${vaultName} - nothing to do, no changes made. Time: $now. Log: $LogFile"
     }
 }
 

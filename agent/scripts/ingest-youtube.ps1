@@ -87,8 +87,8 @@ foreach ($line in $candidates) {
 
     $status = 'downloaded'
     try {
-        & $ytdlp @dlArgs 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "yt-dlp exited with code $LASTEXITCODE for $id" }
+        $dlOutput = & $ytdlp @dlArgs 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "yt-dlp exited with code $LASTEXITCODE for ${id}: $($dlOutput -join ' ')" }
 
         # Canonical caption selection: prefer en-orig, else en; delete the other variant.
         $preferred = $null

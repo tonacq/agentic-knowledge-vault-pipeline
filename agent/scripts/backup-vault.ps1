@@ -32,8 +32,31 @@ $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $backupName = "${vaultName}_backup_${stamp}.zip"
 $backupPath = Join-Path $archiveDir $backupName
 
-$includePaths = @('config', 'working/manifest.csv', 'wiki') | ForEach-Object { Join-Path $VaultRoot $_ } | Where-Object { Test-Path -LiteralPath $_ }
-Compress-Archive -Path $includePaths -DestinationPath $backupPath -Force
+# Stage into a temp directory that mirrors the desired archive layout, so
+# working/manifest.csv lands at working/manifest.csv inside the zip - not flattened to the
+# zip root the way passing the bare file path to Compress-Archive would produce - without
+# pulling in the rest of working/ (raw downloads, clean transcripts, batches).
+$stagingDir = Join-Path ([System.IO.Path]::GetTempPath()) "vault-backup-staging-$([guid]::NewGuid())"
+New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
+try {
+    foreach ($dir in @('config', 'wiki')) {
+        $src = Join-Path $VaultRoot $dir
+        if (Test-Path -LiteralPath $src) {
+            Copy-Item -LiteralPath $src -Destination (Join-Path $stagingDir $dir) -Recurse
+        }
+    }
+
+    $manifestSrc = Join-Path $VaultRoot 'working/manifest.csv'
+    if (Test-Path -LiteralPath $manifestSrc) {
+        $stagedWorking = Join-Path $stagingDir 'working'
+        New-Item -ItemType Directory -Force -Path $stagedWorking | Out-Null
+        Copy-Item -LiteralPath $manifestSrc -Destination (Join-Path $stagedWorking 'manifest.csv')
+    }
+
+    Compress-Archive -Path (Join-Path $stagingDir '*') -DestinationPath $backupPath -Force
+} finally {
+    Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 # Retention: keep only the newest N per config.backup.keep
 $keep = if ($config.backup.keep) { [int]$config.backup.keep } else { 12 }

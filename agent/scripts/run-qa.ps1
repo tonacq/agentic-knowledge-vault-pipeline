@@ -27,11 +27,33 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Sync-SourcePageFrontmatter($SourceFile) {
+    if (-not $SourceFile -or -not (Test-Path -LiteralPath $SourceFile)) {
+        return 'missing'
+    }
+    $raw = Get-Content -LiteralPath $SourceFile -Raw
+    if ($raw -notmatch '(?s)^(---\r?\n.*?\r?\n---\r?\n)') {
+        return 'no-frontmatter'
+    }
+    $frontmatterBlock = $matches[1]
+    if ($frontmatterBlock -match '(?m)^synthesis_status:\s*included\s*\r?$') {
+        return 'skipped'
+    }
+    if ($frontmatterBlock -notmatch '(?m)^synthesis_status:.*$') {
+        return 'no-field'
+    }
+    $newFrontmatterBlock = [regex]::Replace($frontmatterBlock, '(?m)^synthesis_status:.*$', 'synthesis_status: included')
+    $newRaw = $newFrontmatterBlock + $raw.Substring($frontmatterBlock.Length)
+    Set-Content -LiteralPath $SourceFile -Value $newRaw -NoNewline -Encoding utf8
+    return 'updated'
+}
+
 $manifestPath = Join-Path $VaultRoot 'working/manifest.csv'
 $resultFile   = Join-Path $VaultRoot 'working/temp/synthesis-result.json'
 $manifest = @(Import-Csv -LiteralPath $manifestPath)
 $changed = 0
 $templateArtefacts = 0
+$result = $null
 
 if (Test-Path -LiteralPath $resultFile) {
     $result = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
@@ -48,8 +70,26 @@ if (Test-Path -LiteralPath $resultFile) {
         $row.last_updated           = (Get-Date).ToString('o')
         $changed++
     }
+}
 
-    Move-Item -LiteralPath $resultFile -Destination "$resultFile.$($result.batch).processed" -Force
+# Frontmatter sync: extends run-vault.ps1's rule that run-qa.ps1 is "the only stage
+# permitted to update synthesis_status" to also cover the wiki/sources/*.md frontmatter
+# copy, so there is exactly one deterministic writer for the field in both locations.
+# Runs over every row currently 'included' in the manifest - not just rows that
+# transitioned this run - so a plain re-run also backfills historical rows whose
+# synthesis-result.json has already been archived/consumed by an earlier run.
+$frontmatterUpdated = 0
+$frontmatterSkipped = 0
+foreach ($row in $manifest) {
+    if ($row.synthesis_status -ne 'included') { continue }
+    $syncResult = Sync-SourcePageFrontmatter -SourceFile $row.source_file
+    switch ($syncResult) {
+        'updated'        { $frontmatterUpdated++; Write-Host "  Frontmatter synced to included: $($row.source_file)" }
+        'skipped'        { $frontmatterSkipped++ }
+        'missing'        { Write-Warning "Frontmatter sync skipped - source_file not found for $($row.video_id): $($row.source_file)" }
+        'no-frontmatter' { Write-Warning "Frontmatter sync skipped - no frontmatter block in $($row.source_file)" }
+        'no-field'       { Write-Warning "Frontmatter sync skipped - no synthesis_status field in $($row.source_file)" }
+    }
 }
 
 # Report-only template-artefact scan (does not modify anything)
@@ -65,13 +105,34 @@ if ($changed -gt 0) {
     Move-Item -LiteralPath $tmp -Destination $manifestPath -Force
 }
 
+# Archive the result file only after the manifest commit above has succeeded, so a crash
+# in between leaves the manifest already correct - worst case a result file is left
+# un-archived (recoverable/inspectable), not silently-lost evidence of completed work.
+if ($result) {
+    Move-Item -LiteralPath $resultFile -Destination "$resultFile.$($result.batch).processed" -Force
+}
+
 $missingSourcePages = @($manifest | Where-Object { $_.ingest_status -eq 'ingested' -and -not (Test-Path -LiteralPath $_.source_file) }).Count
 
 Write-Host "QA reconciliation complete."
 Write-Host "  Rows updated to included: $changed"
 Write-Host "  Rows with missing source pages: $missingSourcePages"
 Write-Host "  Pages with template artefacts remaining: $templateArtefacts"
+Write-Host "  Source-page frontmatter files updated: $frontmatterUpdated"
+Write-Host "  Source-page frontmatter files already correct: $frontmatterSkipped"
 
 if ($missingSourcePages -gt 0) {
     Write-Warning "$missingSourcePages row(s) reference a source_file that does not exist on disk."
 }
+
+# Structured, machine-readable signal for run-vault.ps1 to distinguish a real-work run
+# from a no-change run when deciding which Telegram event to fire (Success vs NoChange).
+# Written unconditionally (even when $changed -eq 0) so a stale file from an earlier run
+# can never be misread as this run's result.
+$qaResultPath = Join-Path $VaultRoot 'working/temp/qa-result.json'
+New-Item -ItemType Directory -Force -Path (Split-Path -Path $qaResultPath -Parent) | Out-Null
+[ordered]@{
+    rowsChanged        = $changed
+    frontmatterUpdated = $frontmatterUpdated
+    timestamp          = (Get-Date).ToString('o')
+} | ConvertTo-Json | Out-File -LiteralPath $qaResultPath -Encoding utf8 -Force
