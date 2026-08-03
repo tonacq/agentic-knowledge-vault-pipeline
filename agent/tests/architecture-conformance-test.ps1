@@ -61,7 +61,7 @@ $requiredFiles = @(
     'agent/scripts/run-vault.ps1', 'agent/scripts/ingest-youtube.ps1',
     'agent/scripts/ingest-documents.ps1', 'agent/scripts/create-source-pages.ps1',
     'agent/scripts/run-claude-synthesis.ps1', 'agent/scripts/run-qa.ps1',
-    'agent/scripts/backup-vault.ps1', 'agent/scheduling/schedule.csv',
+    'agent/scripts/backup-vault.ps1', 'agent/scheduling/schedule.csv.example',
     'agent/scheduling/ubuntu/run-wikiagent.sh',
     'agent/scheduling/ubuntu/systemd/wikiagent.service',
     'agent/scheduling/ubuntu/systemd/wikiagent.timer'
