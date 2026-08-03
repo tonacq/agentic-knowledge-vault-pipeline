@@ -1,4 +1,5 @@
 vault_name,job_type,day_of_week,time_utc,enabled
 _template,full,Sun,09:00,false
 Nate_Herk,full,Sun,09:00,false
-DWSIM,full,Sun,09:00,false
+DWSIM,full,Sat,18:00,true
+NateHerk_Rev07,full,Sat,17:00,true

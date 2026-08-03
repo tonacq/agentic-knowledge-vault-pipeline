@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 The single authoritative, idempotent reconciliation pass. Reads
 working/temp/synthesis-result.json (if present from this run) plus the current state of
@@ -52,6 +52,7 @@ $manifestPath = Join-Path $VaultRoot 'working/manifest.csv'
 $resultFile   = Join-Path $VaultRoot 'working/temp/synthesis-result.json'
 $manifest = @(Import-Csv -LiteralPath $manifestPath)
 $changed = 0
+$includedTransitions = 0
 $templateArtefacts = 0
 $result = $null
 
@@ -69,6 +70,32 @@ if (Test-Path -LiteralPath $resultFile) {
         $row.synthesis_batch        = $result.batch
         $row.last_updated           = (Get-Date).ToString('o')
         $changed++
+        $includedTransitions++
+    }
+}
+
+# Reconcile stale source_file pointers: create-source-pages.ps1 records a fixed
+# wiki/sources/<slug>.md path when it first creates a source page, but
+# run-claude-synthesis.ps1's headless Claude Code invocation is free to rename or
+# recreate that page (e.g. to match the vault's established date_videoid_slug.md
+# convention) — and per claude.md it is only permitted to write
+# working/temp/synthesis-result.json, never the manifest directly, so nothing
+# previously kept the two in sync. This locates the real file on disk via its unique
+# video_id token and corrects the pointer. An absent or ambiguous match is left alone
+# (surfaced via the existing missingSourcePages warning below) rather than guessed at,
+# so this stays safe to run unattended.
+$sourceFileReconciled = 0
+$sourcesDir = Join-Path $VaultRoot 'wiki/sources'
+if (Test-Path -LiteralPath $sourcesDir) {
+    foreach ($row in $manifest) {
+        if ($row.ingest_status -ne 'ingested') { continue }
+        if ($row.source_file -and (Test-Path -LiteralPath $row.source_file)) { continue }
+        $onDiskMatches = @(Get-ChildItem -LiteralPath $sourcesDir -Filter "*_$($row.video_id)_*.md" -ErrorAction SilentlyContinue)
+        if ($onDiskMatches.Count -eq 1) {
+            $row.source_file = $onDiskMatches[0].FullName
+            $sourceFileReconciled++
+            $changed++
+        }
     }
 }
 
@@ -115,7 +142,8 @@ if ($result) {
 $missingSourcePages = @($manifest | Where-Object { $_.ingest_status -eq 'ingested' -and -not (Test-Path -LiteralPath $_.source_file) }).Count
 
 Write-Host "QA reconciliation complete."
-Write-Host "  Rows updated to included: $changed"
+Write-Host "  Rows updated to included: $includedTransitions"
+Write-Host "  Rows with source_file path reconciled: $sourceFileReconciled"
 Write-Host "  Rows with missing source pages: $missingSourcePages"
 Write-Host "  Pages with template artefacts remaining: $templateArtefacts"
 Write-Host "  Source-page frontmatter files updated: $frontmatterUpdated"
