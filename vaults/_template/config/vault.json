@@ -4,6 +4,7 @@
   "creator": "",
   "creator_page": "",
   "max_videos": 80,
+  "max_transcript_attempts": 3,
   "caption_languages": ["en-orig", "en"],
   "yt_dlp_path": "yt-dlp",
   "proxy": "",

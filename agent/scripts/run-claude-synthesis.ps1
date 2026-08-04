@@ -41,7 +41,7 @@ if ($LintReview) {
 # Scheduled lint-review
 
 Follow the "Scheduled lint-review runs" section of config/claude.md exactly.
-This is report-only: analyze the vault, write wiki/synthesis/lint_report_$(Get-Date -Format 'yyyy-MM-dd').md,
+This is report-only: analyze the vault, write reports/lint_report_$(Get-Date -Format 'yyyy-MM-dd').md,
 make no other changes.
 "@ | Out-File -LiteralPath $lintPrompt -Encoding utf8
 

@@ -29,7 +29,7 @@ When invoked with a `lint-review` job (see `agent/scheduling/schedule.csv`), you
 **report-only mode**:
 - Analyze the full vault for stale synthesis, orphaned source pages, broken internal links,
   and structural drift against this template.
-- Write findings to `wiki/synthesis/lint_report_<date>.md`.
+- Write findings to `reports/lint_report_<date>.md`.
 - Make no other changes. Do not edit any other file in this run.
 
 ## Budget

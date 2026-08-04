@@ -144,15 +144,114 @@ work against a real YouTube channel. Set `vault.json → proxy` to
 `socks5h://127.0.0.1:25344` once that service is running, or leave it blank if the host
 doesn't need one.
 
+## Retry cap and permanent parking
+
+`ingest-youtube.ps1` retries any video whose caption download previously failed —
+but not forever. Each row tracks `transcript_attempts`, and once a video hits
+`max_transcript_attempts` (default `3`, configurable per vault) without producing a
+usable transcript, its `transcript_status` becomes `parked`.
+
+- **A parked video is permanently skipped** on every future scan — no further
+  network/proxy calls for it, no manifest churn. This exists specifically to stop
+  repeatedly re-attempting videos that are genuinely caption-less on YouTube's side, or
+  have persistently unusable captions — retrying those forever wastes real proxy/network
+  resources for no possible gain.
+- **Parking is reversible, but only manually.** If you believe a parked video should be
+  retried (e.g. YouTube captions were added later, or a transient issue is now
+  resolved), edit that row's `transcript_status` back to `missing_transcript` and lower
+  `transcript_attempts` in `working/manifest.csv` directly. Nothing in the pipeline does
+  this automatically.
+- Check a vault's manifest for `transcript_status = parked` rows if you're trying to
+  understand why a channel's real video count doesn't match what's actually been
+  processed — a parked count is expected and healthy for any real channel with
+  genuinely caption-less content, not necessarily a defect.
+
+## Document ingestion (.pdf / .docx / .md) — untested
+
+`ingest-documents.ps1` registers manually dropped files from a vault's `input/` folder,
+and the manifest/pipeline plumbing around it is real and structurally verified. However:
+
+- **PDF/DOCX text extraction is a documented placeholder, not a working extractor.**
+  `ingest-documents.ps1` currently writes an explicit `[EXTRACTION PENDING]` marker
+  rather than real extracted text — this is intentionally visible, not a silent gap, but
+  it means no real PDF or DOCX has ever actually been processed end-to-end through this
+  pipeline as of this release.
+  - Plain `.md`/`.txt` files should ingest correctly (no extraction step needed), but
+    even this path has not been exercised with a real file to date.
+- **Do not rely on document ingestion for anything you need working today.** Treat it as
+  a scaffold to build on, not a verified feature, until a real extractor is wired in and
+  tested against real files of each supported type.
+
+## Lint-review
+
+A separate scheduled job type (`-JobType lint-review` in `run-vault.ps1`, driven by
+`schedule.csv` rows with `job_type=lint-review`) that runs Claude Code in report-only mode:
+no ingestion, no content synthesis, no manifest writes beyond what the report itself
+records. It analyzes the full vault for stale synthesis, orphaned source pages, broken
+internal links, and structural drift, then writes a single `reports/lint_report_<date>.md`
+— a top-level folder, sibling to `wiki/`/`working/`/`config/`, kept deliberately outside
+the knowledge graph so a lint report never pollutes Obsidian search/graph view.
+
+Tested and functional as of this release: run for real against a disposable replica vault
+(a full copy of real vault content, not synthetic data), with real evidence gathered at
+every step — the report landed at the correct `reports/` location (not `wiki/synthesis/`,
+an earlier, since-corrected path), `wiki/synthesis/` and every other file outside
+`reports/` were confirmed byte-for-byte untouched, and `sync-vault (push)` correctly
+delivers the report to the vault's real Drive location afterward. That last part required
+a real fix: the `lint-review` job type originally never pushed at all, so a scheduled
+lint-review's report would sit on the VM and never reach Drive — fixed and re-verified
+with a real end-to-end run showing the report present on Drive via `rclone`.
+
+The findings from that real test run were reviewed directly and acted on: one was
+identified as a test-setup artifact (not applicable to real vaults), one was a genuine
+data-quality issue (a source page missing a frontmatter field, confirmed against two
+independent real sources and corrected), and one was reviewed and deliberately left as-is
+(an intentionally-standalone page, no fix needed).
+
 ## Telegram notifications
 
-Matched to the proven three-message pattern from `run_nate_herk_weekly.sh`: a run that
-couldn't start (lock contention), a run that failed mid-pipeline (with exit code and log
-path), and a successful run — sent from `run-vault.ps1` at the exact points those events
-happen, not as one generic end-of-run message.
+Five distinct events, each sent from `run-vault.ps1` at the exact point that condition
+is determined — not one generic end-of-run message:
+
+| Event | Meaning |
+|---|---|
+| `Blocked` | Run couldn't start — another run for this vault is already in progress (lock contention) |
+| `Failed` | A real content-pipeline stage broke (ingest, clean, create-source-pages, synthesis, or QA) |
+| `PartialSuccess` | Only a non-critical stage failed (e.g. Drive sync or backup) while all real content work succeeded |
+| `Success` | Real content work completed this run |
+| `NoChange` | Run completed cleanly with nothing pending — no error, just nothing new to do |
+
+Every message also carries a `Stats` line (new/retried/parked counts, current
+included/pending/parked totals) so you're never left inferring what actually happened
+from the event label alone — `Failed` specifically means real content work broke, not
+"something, somewhere, had an issue this run."
 
 Credentials (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) are read from, in order: already-set
 process environment variables, then `<vault>/config/secrets.env`, then a shared
 `agent/secrets.env`. Copy `config/secrets.env.example` in `vaults/_template/` to
 `secrets.env` and fill it in per vault (or once at the agent level if every vault shares one
 bot/chat). No file means notifications are silently skipped, not an error.
+
+## Backup destinations (Drive)
+
+Every vault's real Drive backup location is `<drive_path>/working/backups` - nested inside
+the vault's own working directory, not a sibling folder and not directly under `drive_path`.
+This became the explicit standard after NateHerk_Rev07 and DWSIM were found to have
+diverged to two different hand-typed values (`<drive_path>/backups` and a sideline
+`<name>_backup` folder respectively), with no code-level convention or documentation behind
+either - `vault.json` is gitignored, so no git history recorded when or why either value was
+set. All real vaults' `backup.destination` values have been reconciled to the standard.
+
+`backup-vault.ps1` auto-derives `backup.destination` as `<drive_path>/working/backups`
+whenever it's blank and `drive_path` is set. `_template` ships `destination` blank on
+purpose, so any vault provisioned from it inherits the standard by default instead of
+requiring manual entry - the exact gap that caused the original divergence. If
+`backup.enabled` is true but no usable destination can be resolved (blank `destination` with
+a blank `drive_path` too, or no `remote` configured), the script warns instead of silently
+skipping the remote push.
+
+`backup.keep` (default 12) is enforced in two places: locally against the VM's `archive/`
+folder (pre-existing, unchanged), and against the real Drive destination itself (added -
+previously Drive-side backups accumulated unbounded, since local pruning never touched what
+had already been pushed). Both prune to the newest N by the timestamp embedded in the
+backup filename (`<vault>_backup_YYYYMMDD_HHMMSS.zip`).

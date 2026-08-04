@@ -80,6 +80,11 @@ $PID | Out-File -LiteralPath $lockFile -Encoding ascii -Force
 $runStart = Get-Date
 $stageResults = [ordered]@{}
 
+# Stages whose failure is cosmetic/recoverable (e.g. the known first-run sync-vault
+# pull-clobber-protection refusal) and must not be reported as a pipeline Failure -
+# real content work can still have succeeded even if one of these trips.
+$softStageNames = @('sync-vault (pull)', 'sync-vault (push)', 'backup-vault')
+
 function Invoke-Stage($name, $scriptPath, $extraArgs) {
     if (-not (Test-Path -LiteralPath $scriptPath)) {
         $stageResults[$name] = 'SKIPPED (script not present)'
@@ -104,6 +109,12 @@ try {
         # Report-only vault-wide analysis. No ingestion, no synthesis writes beyond the
         # lint report itself. See vault-local config/claude.md for the exact contract.
         Invoke-Stage 'run-claude-synthesis (lint-review)' (Join-Path $AgentRoot 'scripts/run-claude-synthesis.ps1') @{ LintReview = $true }
+        if (-not $ReportOnly) {
+            # Push-after-run: the lint report is real vault content and needs to reach
+            # Drive like any other output - previously this branch never pushed at all,
+            # so a scheduled lint-review's report sat on the VM and never synced.
+            Invoke-Stage 'sync-vault (push)' (Join-Path $AgentRoot 'scripts/sync-vault.ps1') @{ Direction = 'Push' }
+        }
     } else {
         if (-not $SkipYoutube)   { Invoke-Stage 'ingest-youtube'       (Join-Path $AgentRoot 'scripts/ingest-youtube.ps1')       @() }
         if (-not $SkipClean)     { Invoke-Stage 'clean-transcripts'    (Join-Path $AgentRoot 'scripts/clean-transcripts.ps1')    @() }
@@ -159,17 +170,78 @@ if (Test-Path -LiteralPath $qaResultPath) {
     }
 }
 
-$anyFailed = $stageResults.Values | Where-Object { $_ -like 'FAILED*' }
-if ($anyFailed) {
-    & (Join-Path $AgentRoot 'scripts/send-notification.ps1') -VaultRoot $VaultRoot -Event Failed -ExitCode '1' -LogFile $resultFile
+# Read ingest-youtube.ps1's structured result (if it ran this pass) so notifications can
+# report accurate this-run ingestion stats without re-deriving them. Missing/unreadable
+# file (e.g. -SkipYoutube, or a vault with no channel_url) defaults to zeros.
+$ingestResultPath = Join-Path $VaultRoot 'working/temp/ingest-result.json'
+$ingestResult = [ordered]@{ scanned = 0; newIngested = 0; retried = 0; parkedThisRun = 0; skippedAlreadyParked = 0 }
+if (Test-Path -LiteralPath $ingestResultPath) {
+    try {
+        $parsed = Get-Content -LiteralPath $ingestResultPath -Raw | ConvertFrom-Json
+        foreach ($key in @('scanned', 'newIngested', 'retried', 'parkedThisRun', 'skippedAlreadyParked')) {
+            if ($parsed.PSObject.Properties[$key]) { $ingestResult[$key] = [int]$parsed.$key }
+        }
+    } catch {
+        Write-Warning "Could not parse ingest-result.json for stats: $($_.Exception.Message)"
+    }
+}
+
+# Manifest snapshot: totals across the vault as it stands at the end of this run, so
+# notifications carry real counts rather than just this-run deltas.
+$manifestPath = Join-Path $VaultRoot 'working/manifest.csv'
+$manifestTotal = 0
+$manifestIncluded = 0
+$manifestPending = 0
+$manifestParked = 0
+$manifestTransientFailed = 0
+if (Test-Path -LiteralPath $manifestPath) {
+    try {
+        $manifestRows = @(Import-Csv -LiteralPath $manifestPath)
+        $manifestTotal = $manifestRows.Count
+        $manifestIncluded = @($manifestRows | Where-Object { $_.synthesis_status -eq 'included' }).Count
+        $manifestPending = @($manifestRows | Where-Object { $_.synthesis_status -eq 'pending' -and $_.transcript_status -ne 'parked' }).Count
+        $manifestParked = @($manifestRows | Where-Object { $_.transcript_status -eq 'parked' }).Count
+        $manifestTransientFailed = @($manifestRows | Where-Object { $_.transcript_status -like 'missing*' -or $_.transcript_status -like 'failed*' }).Count
+    } catch {
+        Write-Warning "Could not parse manifest.csv for stats snapshot: $($_.Exception.Message)"
+    }
+}
+
+$statsObject = [ordered]@{
+    ingestScanned        = $ingestResult.scanned
+    ingestNew            = $ingestResult.newIngested
+    ingestRetried        = $ingestResult.retried
+    ingestParkedThisRun  = $ingestResult.parkedThisRun
+    ingestSkippedParked  = $ingestResult.skippedAlreadyParked
+    manifestTotal        = $manifestTotal
+    manifestIncluded     = $manifestIncluded
+    manifestPending      = $manifestPending
+    manifestParked       = $manifestParked
+    manifestTransientFailed = $manifestTransientFailed
+    qaRowsChanged        = $qaRowsChanged
+}
+$statsJson = $statsObject | ConvertTo-Json -Compress
+
+$failedStageNames = @($stageResults.Keys | Where-Object { $stageResults[$_] -like 'FAILED*' })
+$criticalFailed = @($failedStageNames | Where-Object { $softStageNames -notcontains $_ })
+$softFailed     = @($failedStageNames | Where-Object { $softStageNames -contains $_ })
+
+if ($criticalFailed.Count -gt 0) {
+    $detail = "Critical stage(s) failed: $($criticalFailed -join ', ')"
+    & (Join-Path $AgentRoot 'scripts/send-notification.ps1') -VaultRoot $VaultRoot -Event Failed -ExitCode '1' -LogFile $resultFile -Detail $detail -Stats $statsJson
     Write-Host "PIPELINE_RESULT: PARTIAL_FAILURE ($VaultName)"
     exit 1
+} elseif ($softFailed.Count -gt 0) {
+    $detail = "Non-critical stage(s) had an issue (real content work still succeeded): $($softFailed -join ', ')"
+    & (Join-Path $AgentRoot 'scripts/send-notification.ps1') -VaultRoot $VaultRoot -Event PartialSuccess -LogFile $resultFile -Detail $detail -Stats $statsJson
+    Write-Host "PIPELINE_RESULT: PARTIAL_SUCCESS ($VaultName)"
+    exit 0
 } elseif ($qaRowsChanged -gt 0) {
-    & (Join-Path $AgentRoot 'scripts/send-notification.ps1') -VaultRoot $VaultRoot -Event Success -LogFile $resultFile
+    & (Join-Path $AgentRoot 'scripts/send-notification.ps1') -VaultRoot $VaultRoot -Event Success -LogFile $resultFile -Stats $statsJson
     Write-Host "PIPELINE_RESULT: SUCCESS ($VaultName)"
     exit 0
 } else {
-    & (Join-Path $AgentRoot 'scripts/send-notification.ps1') -VaultRoot $VaultRoot -Event NoChange -LogFile $resultFile
+    & (Join-Path $AgentRoot 'scripts/send-notification.ps1') -VaultRoot $VaultRoot -Event NoChange -LogFile $resultFile -Stats $statsJson
     Write-Host "PIPELINE_RESULT: NO_CHANGE ($VaultName)"
     exit 0
 }

@@ -39,6 +39,7 @@ New-Item -ItemType Directory -Force -Path $rawDir, $cleanDir | Out-Null
 
 $ytdlp = if ($config.yt_dlp_path) { $config.yt_dlp_path } else { 'yt-dlp' }
 $captionLangs = if ($config.caption_languages) { $config.caption_languages } else { @('en-orig', 'en') }
+$maxAttempts = if ($config.max_transcript_attempts) { [int]$config.max_transcript_attempts } else { 3 }
 
 $ytArgs = @('--flat-playlist', '--print', '%(id)s|%(title)s', $config.channel_url)
 if ($config.proxy)  { $ytArgs = @('--proxy', $config.proxy) + $ytArgs }
@@ -59,21 +60,35 @@ $manifest = @()
 if (Test-Path -LiteralPath $manifestPath) {
     $manifest = @(Import-Csv -LiteralPath $manifestPath)
 }
+foreach ($row in $manifest) {
+    if (-not $row.PSObject.Properties['transcript_attempts']) {
+        $row | Add-Member -NotePropertyName transcript_attempts -NotePropertyValue '0' -Force
+    }
+}
 $knownIds = @{}
 foreach ($row in $manifest) { $knownIds[$row.video_id] = $row }
 
 $maxVideos = if ($config.max_videos) { [int]$config.max_videos } else { 80 }
-$candidates = $scanned | Select-Object -First $maxVideos
+$candidates = @($scanned | Select-Object -First $maxVideos)
 
 $newRows = @()
+$skippedAlreadyParked = 0
+$newIngestedCount = 0
+$retriedCount = 0
+$parkedThisRun = 0
 foreach ($line in $candidates) {
     $parts = $line -split '\|', 2
     if ($parts.Count -lt 2) { continue }
     $id, $title = $parts
 
     $existing = $knownIds[$id]
+    if ($existing -and $existing.transcript_status -eq 'parked') {
+        $skippedAlreadyParked++
+        continue
+    }
     $needsRetry = $existing -and ($existing.transcript_status -like 'missing*' -or $existing.transcript_status -like 'failed*')
     if ($existing -and -not $needsRetry) { continue }  # already downloaded, nothing to do
+    $attemptsSoFar = if ($existing -and $existing.PSObject.Properties['transcript_attempts']) { [int]$existing.transcript_attempts } else { 0 }
 
     $dlArgs = @(
         '--write-auto-subs', '--write-subs',
@@ -106,11 +121,21 @@ foreach ($line in $candidates) {
         Write-Warning "Video $id ($title): $($_.Exception.Message)"
     }
 
+    $attempts = $attemptsSoFar + 1
+    if ($status -ne 'downloaded' -and $attempts -ge $maxAttempts) {
+        $status = 'parked'
+        Write-Warning "Video $id ($title): reached $attempts/$maxAttempts attempts - parking permanently."
+    }
+
+    if ($existing) { $retriedCount++ } else { $newIngestedCount++ }
+    if ($status -eq 'parked') { $parkedThisRun++ }
+
     $row = [ordered]@{
         video_id                = $id
         title                   = $title
         source_type             = 'youtube'
         transcript_status       = $status
+        transcript_attempts     = $attempts
         clean_status            = ''
         clean_transcript_file   = ''
         source_status           = ''
@@ -135,4 +160,15 @@ if ($newRows.Count -gt 0) {
     Move-Item -LiteralPath $tmp -Destination $manifestPath -Force
 }
 
-Write-Host "YouTube ingestion complete: scanned $($candidates.Count), new/retried $($newRows.Count)"
+$ingestResultPath = Join-Path $VaultRoot 'working/temp/ingest-result.json'
+New-Item -ItemType Directory -Force -Path (Split-Path -Path $ingestResultPath -Parent) | Out-Null
+[ordered]@{
+    scanned              = $candidates.Count
+    newIngested          = $newIngestedCount
+    retried              = $retriedCount
+    parkedThisRun        = $parkedThisRun
+    skippedAlreadyParked = $skippedAlreadyParked
+    timestamp            = (Get-Date).ToString('o')
+} | ConvertTo-Json | Out-File -LiteralPath $ingestResultPath -Encoding utf8 -Force
+
+Write-Host "YouTube ingestion complete: scanned $($candidates.Count), new/retried $($newRows.Count), parked $parkedThisRun, skipped-parked $skippedAlreadyParked"

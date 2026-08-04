@@ -20,9 +20,11 @@ Never throws — a notification failure must never fail the pipeline run itself.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$VaultRoot,
-    [Parameter(Mandatory = $true)][ValidateSet('Blocked', 'Failed', 'Success', 'NoChange')][string]$Event,
+    [Parameter(Mandatory = $true)][ValidateSet('Blocked', 'Failed', 'Success', 'NoChange', 'PartialSuccess')][string]$Event,
     [string]$ExitCode,
-    [string]$LogFile
+    [string]$LogFile,
+    [string]$Stats,
+    [string]$Detail
 )
 
 $ErrorActionPreference = 'Continue'
@@ -57,13 +59,16 @@ $message = switch ($Event) {
         "Wiki pipeline did not start for ${vaultName}: another run is already active. Time: $now"
     }
     'Failed' {
-        "Wiki pipeline FAILED for ${vaultName}. Exit code: $ExitCode. Time: $now. Log: $LogFile"
+        "Wiki pipeline FAILED for ${vaultName}. Exit code: $ExitCode. Time: $now. Log: $LogFile. Failed stages: $Detail. Stats: $Stats"
+    }
+    'PartialSuccess' {
+        "Wiki pipeline completed for ${vaultName} - real content work succeeded; a non-critical stage had an issue and needs attention. Time: $now. Log: $LogFile. Non-critical issue: $Detail. Stats: $Stats"
     }
     'Success' {
-        "Wiki pipeline completed successfully for ${vaultName}. Time: $now. Log: $LogFile"
+        "Wiki pipeline completed successfully for ${vaultName}. Time: $now. Log: $LogFile. Stats: $Stats"
     }
     'NoChange' {
-        "Wiki pipeline ran for ${vaultName} - nothing to do, no changes made. Time: $now. Log: $LogFile"
+        "Wiki pipeline ran for ${vaultName} - nothing to do, no changes made. Time: $now. Log: $LogFile. Stats: $Stats"
     }
 }
 

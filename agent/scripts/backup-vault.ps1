@@ -65,16 +65,55 @@ Get-ChildItem -LiteralPath $archiveDir -Filter "${vaultName}_backup_*.zip" |
     Select-Object -Skip $keep |
     Remove-Item -Force
 
-if ($config.backup.remote -and $config.backup.destination) {
+# Resolve the remote destination. An explicitly configured value always wins; a blank
+# destination (e.g. a freshly provisioned vault still carrying the _template default) is
+# auto-derived from drive_path rather than silently skipping the remote backup - this is
+# the exact gap that let NateHerk_Rev07/DWSIM diverge to two different hand-typed layouts.
+$backupRemote = $config.backup.remote
+$backupDestination = $config.backup.destination
+if ($backupRemote -and -not $backupDestination -and $config.drive_path) {
+    $backupDestination = "$($config.drive_path)/working/backups"
+    Write-Host "No backup.destination configured; auto-derived from drive_path: $backupDestination"
+}
+
+if ($backupRemote -and $backupDestination) {
     if (Get-Command rclone -ErrorAction SilentlyContinue) {
-        & rclone copy $backupPath "$($config.backup.remote):$($config.backup.destination)" 2>&1 | Out-Null
+        & rclone copy $backupPath "${backupRemote}:${backupDestination}" 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            throw "rclone copy failed for backup destination $($config.backup.remote):$($config.backup.destination) (exit code $LASTEXITCODE)"
+            throw "rclone copy failed for backup destination ${backupRemote}:${backupDestination} (exit code $LASTEXITCODE)"
         }
-        Write-Host "Backup synced to $($config.backup.remote):$($config.backup.destination)"
+        Write-Host "Backup synced to ${backupRemote}:${backupDestination}"
+
+        # Drive-side retention: local archive/ pruning above only ever touched the VM copy,
+        # so pushed backups accumulated on Drive forever. Mirror the same newest-N policy
+        # against the real remote, scoped to this vault's own backup files only.
+        try {
+            $remoteListingRaw = & rclone lsjson "${backupRemote}:${backupDestination}" 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                $remoteBackups = $remoteListingRaw | ConvertFrom-Json |
+                    Where-Object { $_.Name -like "${vaultName}_backup_*.zip" }
+                $remoteToPrune = $remoteBackups |
+                    Sort-Object { [regex]::Match($_.Name, '\d{8}_\d{6}').Value } -Descending |
+                    Select-Object -Skip $keep
+                foreach ($f in $remoteToPrune) {
+                    & rclone deletefile "${backupRemote}:${backupDestination}/$($f.Name)" 2>&1 | Out-Null
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Warning "Failed to prune remote backup $($f.Name) (exit code $LASTEXITCODE)."
+                    } else {
+                        Write-Host "Pruned remote backup: $($f.Name)"
+                    }
+                }
+            } else {
+                Write-Warning "Could not list remote backups for retention check at ${backupRemote}:${backupDestination}: $remoteListingRaw"
+            }
+        } catch {
+            Write-Warning "Drive-side retention check failed (non-fatal, backup itself already succeeded): $($_.Exception.Message)"
+        }
     } else {
         Write-Warning "rclone not found on PATH; local backup only ($backupPath)."
     }
+} elseif ($config.backup.enabled) {
+    Write-Warning "backup.enabled is true but no usable backup destination could be resolved (remote='$backupRemote', destination='$backupDestination', drive_path='$($config.drive_path)'); backup stayed local-only ($backupPath)."
 }
 
 Write-Host "Backup complete: $backupPath"
