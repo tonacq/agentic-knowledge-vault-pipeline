@@ -27,6 +27,142 @@ is never confused with the ChatGPT-produced `DWSIM` / `Nate_Herk` vaults living 
 See `agent/docs/README.md` for the full gap list and `BUILD-REPORT.json` for the conformance
 test result this exact package produced.
 
+## Architecture
+
+```
+agentic-knowledge-vault-pipeline/
+│
+├── agent/                    shared code — one copy, used by every vault
+│   ├── scripts/               ingest-youtube.ps1, run-vault.ps1, etc.
+│   ├── scheduling/             schedule.csv (which vault runs when)
+│   └── docs/
+│
+└── vaults/
+    ├── _template/             ← the master pattern (tracked in git)
+    │   ├── config/              vault.json, claude.md, secrets.env.example
+    │   └── (empty scaffold: working/, wiki/, reports/, logs/, ...)
+    │
+    ├── wiki_1/                ← real vault, copied FROM _template
+    │   config/vault.json:        channel_url = "youtube.com/@ChannelOne"
+    │
+    ├── wiki_2/                ← real vault, copied FROM _template
+    │   config/vault.json:        channel_url = "youtube.com/@ChannelTwo"
+    │
+    └── wiki_N/                ← as many as you want, each independent
+        config/vault.json:        channel_url = "youtube.com/@AnyChannel"
+
+    (wiki_1, wiki_2, wiki_N are gitignored — real vault content/config
+     never gets committed; only the empty _template scaffold is tracked)
+```
+Code lives in one place (`agent/`) and is never duplicated. What gets replicated is
+only the empty `_template` pattern — every real vault then diverges purely through
+its own `config/vault.json`, never through different code.
+
+## Pipeline flow
+
+```
+YouTube channel
+      │
+      ▼
+┌─────────────────┐
+│ ingest-youtube    │  scan channel, download captions (yt-dlp)
+└────────┬─────────┘
+         ▼
+┌─────────────────┐
+│ clean-transcripts │  raw .vtt → plain text
+└────────┬─────────┘
+         ▼
+┌─────────────────┐
+│ create-source-    │  plain text → wiki/sources/*.md
+│ pages              │
+└────────┬─────────┘
+         ▼
+┌─────────────────┐
+│ run-claude-        │  Claude Code reads source, decides:
+│ synthesis           │  create/update concept, tool, or workflow page
+└────────┬─────────┘
+         ▼
+┌─────────────────┐
+│ run-qa             │  reconciles manifest ↔ real files
+└────────┬─────────┘
+         ▼
+┌─────────────────┐
+│ sync-vault (push)  │  → Google Drive (canonical copy)
+└────────┬─────────┘
+         ▼
+┌─────────────────┐
+│ Telegram notify    │  Success / PartialSuccess / Failed / NoChange
+└──────────────────┘
+```
+
+## Inside one vault
+
+```
+vaults/<VaultName>/
+├── config/          vault.json, claude.md, secrets.env
+├── working/         manifest.csv (source of truth), backups/
+├── wiki/            ← open THIS in Obsidian
+│   ├── sources/      raw ingested transcripts
+│   ├── concepts/      synthesized knowledge pages
+│   ├── tools/
+│   ├── workflows/
+│   └── synthesis/     cross-source pages + register
+├── reports/         lint-review output (monthly)
+└── logs/            run logs (local only, not synced to Drive)
+```
+
+## Telegram notifications
+
+Every pipeline run sends you a message — success, failure, or nothing-to-do — so you
+don't have to check logs manually.
+
+**Telegram is a free messaging app**, available on iOS, Android, and desktop
+(telegram.org) — if you don't already use it, install it on your phone first; this is
+where your run notifications will actually appear.
+
+Setup:
+1. Message **@BotFather** on Telegram, send `/newbot`, follow the prompts — you'll get
+   back a bot token (a long string like `123456:ABC-DEF...`).
+2. Start a chat with your new bot (search its username, send it any message) so it's
+   allowed to message you back.
+3. Get your chat ID — message **@userinfobot**, it'll reply with your numeric ID.
+4. Copy a template to `secrets.env` and fill in your real values — two options
+   depending on whether you want one bot for every vault, or a different one per
+   vault:
+   - **Per-vault** (different bot/chat for each vault):
+     ```bash
+     cp vaults/_template/config/secrets.env.example vaults/<YourVault>/config/secrets.env
+     ```
+   - **Shared** (one bot/chat for every vault):
+     ```bash
+     cp agent/secrets.env.example agent/secrets.env
+     ```
+   - Vault-level `secrets.env` is checked first if both exist — see
+     `send-notification.ps1`'s credential resolution order for the exact
+     precedence.
+   Then open the file you just created and fill in your real values:
+   ```
+   TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+   TELEGRAM_CHAT_ID=987654321
+   ```
+   Save the file — that's the entire setup, no code changes needed.
+5. If this file is missing, notifications are silently skipped (not an error), so a
+   run without Telegram configured still works, you just won't get pinged.
+
+**What to expect in the message** — five possible events, each meaning something
+different:
+
+| Event | Meaning |
+|---|---|
+| `Blocked` | Run couldn't start — another run for this vault is already in progress |
+| `Failed` | A real content-pipeline stage broke — this is the one to actually act on |
+| `PartialSuccess` | Real content work succeeded; only a non-critical stage (sync/backup) had an issue |
+| `Success` | Real content work completed this run |
+| `NoChange` | Ran cleanly, nothing new to do — not an error |
+
+Every message also includes a `Stats` line (new/retried/parked video counts) so you
+can see what actually happened without digging into logs.
+
 ## Attribution
 
 This project is an independent extension of a publicly shared idea, not an original
