@@ -106,14 +106,37 @@ try {
     Invoke-Stage 'sync-vault (pull)' (Join-Path $AgentRoot 'scripts/sync-vault.ps1') @{ Direction = 'Pull' }
 
     if ($JobType -eq 'lint-review') {
-        # Report-only vault-wide analysis. No ingestion, no synthesis writes beyond the
-        # lint report itself. See vault-local config/claude.md for the exact contract.
-        Invoke-Stage 'run-claude-synthesis (lint-review)' (Join-Path $AgentRoot 'scripts/run-claude-synthesis.ps1') @{ LintReview = $true }
-        if (-not $ReportOnly) {
-            # Push-after-run: the lint report is real vault content and needs to reach
-            # Drive like any other output - previously this branch never pushed at all,
-            # so a scheduled lint-review's report sat on the VM and never synced.
-            Invoke-Stage 'sync-vault (push)' (Join-Path $AgentRoot 'scripts/sync-vault.ps1') @{ Direction = 'Push' }
+        # Monthly cadence with no schedule.csv schema change: schedule.csv still only
+        # expresses day_of_week + time_utc (weekly), so the dispatcher fires this row
+        # every week same as a 'full' row - this check is what actually makes it
+        # monthly. It only proceeds on the LAST occurrence of today's weekday in the
+        # current calendar month (equivalently: today + 7 days rolls into next month).
+        # Gap between runs is therefore always 4 or 5 weeks, never 3 - every month has
+        # at least 4 full weeks, longer months stretch it to 5 - expected, not a bug.
+        # Uses the same UTC clock the dispatcher itself matches day/hour against.
+        $today = (Get-Date).ToUniversalTime().Date
+        $isLastOccurrenceThisMonth = $today.AddDays(7).Month -ne $today.Month
+
+        $lastDayOfMonth = Get-Date -Year $today.Year -Month $today.Month -Day ([DateTime]::DaysInMonth($today.Year, $today.Month)) -Hour 0 -Minute 0 -Second 0
+        $daysBackToLastOccurrence = ([int]$lastDayOfMonth.DayOfWeek - [int]$today.DayOfWeek + 7) % 7
+        $lastOccurrenceDate = $lastDayOfMonth.AddDays(-$daysBackToLastOccurrence)
+
+        if ($isLastOccurrenceThisMonth) {
+            Write-Host "lint-review for ${VaultName}: today ($($today.ToString('ddd yyyy-MM-dd'))) IS the last $($today.DayOfWeek) of $($today.ToString('MMMM')) - running."
+
+            # Report-only vault-wide analysis. No ingestion, no synthesis writes beyond
+            # the lint report itself. See vault-local config/claude.md for the exact
+            # contract.
+            Invoke-Stage 'run-claude-synthesis (lint-review)' (Join-Path $AgentRoot 'scripts/run-claude-synthesis.ps1') @{ LintReview = $true }
+            if (-not $ReportOnly) {
+                # Push-after-run: the lint report is real vault content and needs to
+                # reach Drive like any other output - previously this branch never
+                # pushed at all, so a scheduled lint-review's report sat on the VM and
+                # never synced.
+                Invoke-Stage 'sync-vault (push)' (Join-Path $AgentRoot 'scripts/sync-vault.ps1') @{ Direction = 'Push' }
+            }
+        } else {
+            Write-Host "lint-review for ${VaultName}: today ($($today.ToString('ddd yyyy-MM-dd'))) is NOT the last $($today.DayOfWeek) of $($today.ToString('MMMM')) (that's the $($lastOccurrenceDate.Day)) - skipping until then."
         }
     } else {
         if (-not $SkipYoutube)   { Invoke-Stage 'ingest-youtube'       (Join-Path $AgentRoot 'scripts/ingest-youtube.ps1')       @() }

@@ -201,6 +201,10 @@ sudo systemctl enable --now wikiagent.timer
 pwsh agent/tests/architecture-conformance-test.ps1 -RootPath . -ReportPath conformance-report.json
 ```
 
+`schedule.csv` only expresses a weekly day/time — for the `lint-review` job type this
+maps to a monthly cadence, not weekly; see `agent/docs/schedule-contract.md` for the
+exact rule before assuming a lint-review row runs every week.
+
 ## Config field reference (`config/vault.json`)
 
 The quick-start's "edit `vault.json`" step undersells how many fields matter. Real
