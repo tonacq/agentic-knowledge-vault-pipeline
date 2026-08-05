@@ -1,31 +1,107 @@
-# WikiAgent — Claude build
+# YouTube Wiki Agent
 
-Built by Claude directly against the **locked WikiAgent Architecture Specification v1.0**
-and its governance pack (`01-architecture-spec.md` through `05-decision-log.md`,
-`03-architecture-conformance-test.ps1`) found in this project's Google Drive
-`02-Current-Files/Artefacts/` folder — the same spec the ChatGPT-produced
-`wiki-agent-multivault-rev10-vm-deployable` package was supposed to conform to but was not
-verified against.
-
-**Naming:** the demo/sandbox vault included here is named `Claude_Sandbox` specifically so it
-is never confused with the ChatGPT-produced `DWSIM` / `Nate_Herk` vaults living in Drive.
+An agentic system that ingests YouTube channels and uses Claude Code to autonomously
+manifest structured Obsidian knowledge pages — combining a deterministic ingestion
+pipeline (scan, download, clean) with agentic synthesis and quality review. Point it at
+a channel; it turns that channel's content into a searchable, linked personal wiki you
+can open in Obsidian.
 
 ## What's real vs. what's a skeleton
 
-- **Real and structurally verified:** the full `agent/` + `vaults/_template/` layout, every
-  required file the conformance test checks for, the locking/orchestration logic in
-  `run-vault.ps1`, the interruption-safe manifest reconciliation in `run-qa.ps1`, the
-  scheduler contract and `schedule.csv`-driven dispatch, systemd units.
-- **Functionally real but unverified on the actual VM:** `ingest-youtube.ps1` (canonical
-  caption logic ported from the documented VM behaviour, but not yet run against the real
-  Oracle VM network/proxy setup), `run-claude-synthesis.ps1` (calls the real `claude` CLI,
-  untested against your live subscription auth).
+- **Real and verified through extensive production testing:** the full `agent/` +
+  `vaults/_template/` layout, every required file the conformance test checks for,
+  the locking/orchestration logic in `run-vault.ps1`, the interruption-safe manifest
+  reconciliation in `run-qa.ps1`, the scheduler contract and `schedule.csv`-driven
+  dispatch, systemd units, `ingest-youtube.ps1` (real channel ingestion, real
+  caption downloads, real retry-cap/parking behavior), `run-claude-synthesis.ps1`
+  (real synthesis runs and real monthly lint-review runs, both verified against
+  production vault data, real Claude Code subscription/OAuth auth confirmed
+  working).
 - **Explicit placeholders, not hidden:** PDF/DOCX text extraction in
   `ingest-documents.ps1` — see the `[EXTRACTION PENDING]` marker it writes; wire in a real
   extractor before relying on document ingestion.
 
-See `agent/docs/README.md` for the full gap list and `BUILD-REPORT.json` for the conformance
-test result this exact package produced.
+See `agent/docs/README.md` for the full gap list.
+
+## Development approach
+
+This project was developed using an agentic engineering approach: architectural and
+product decisions made directly, with Claude Code handling implementation, and a
+deliberately heavy verification discipline throughout — visible directly in this repo
+via the runnable architecture conformance test
+(`agent/tests/architecture-conformance-test.ps1`) and the inline "verified for real"
+evidence documented in the Upgrade and Uninstall sections below, rather than taken on
+faith.
+
+**Questions or issues:** use this repo's Issues tab.
+
+## Built with — versions this was tested against
+
+Real, confirmed versions, pulled directly from the test VM (not estimated):
+
+| Component | Version tested | Notes |
+|---|---|---|
+| OS | Ubuntu 24.04.4 LTS ("noble") | |
+| PowerShell | `pwsh` 7.6.3 (Core) | No version-gated syntax (ternary, null-coalescing, etc.) found anywhere in `agent/scripts/`, confirmed via direct grep — the real requirement is PowerShell **Core** specifically (cross-platform), not legacy Windows PowerShell 5.1, which doesn't run on Linux at all. Older Core versions are plausible but untested. |
+| `yt-dlp` | 2026.07.04 (kept current via `pip install -U yt-dlp`) | **Not on the default SSH `$PATH`** — installs to `$HOME/.local/bin/yt-dlp` via `pip --user`. If you SSH in and `yt-dlp --version` says "not found," check that path explicitly before assuming it's not installed. |
+| `rclone` | v1.74.4 | |
+| Claude Code CLI | 2.1.207, `@anthropic-ai/claude-code` | **Does not require Node.js to run** — confirmed on the test VM (zero Node.js installed anywhere on the filesystem): it's a standalone compiled binary once installed, not a Node.js script at runtime. Node.js may still be needed for the *installation* step itself depending on how you install it — check current official install docs. |
+| `systemd` | 255 (255.4-1ubuntu8.16) | |
+
+**Host/infrastructure:** developed and tested on an Oracle Cloud VM (ARM64/aarch64),
+but **Oracle is not a requirement** — any Linux host that stays on and reachable
+works (see "Always-on host expectation" below). The only reason Oracle came up
+specifically: its VM's IP happened to be a datacenter range YouTube blocks more
+aggressively than residential IPs — that's a property of datacenter IPs in general,
+not anything Oracle-specific (see the proxy note in Prerequisites). No minimum
+CPU/RAM/disk specs have been established through real testing — if you hit
+resource limits on a small host, that's genuinely unverified territory this
+project hasn't characterized yet.
+
+If you hit a version-specific issue, check `agent/docs/README.md`'s known-gaps list
+before assuming it's new.
+
+## Attribution
+
+This project is an independent extension of a publicly shared idea, not an original
+concept from scratch. It builds on:
+
+- **Andrej Karpathy** — original concept/gist describing an LLM-driven pipeline that
+  turns YouTube video transcripts into structured wiki-style knowledge pages.
+  https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
+- **Nate Herk** — the YouTube channel whose content was used as the original real-world
+  source/proving ground for the single-vault predecessor to this multi-vault build.
+  https://www.youtube.com/watch?v=sboNwYmH3AY
+
+This repository is an independent, from-scratch rebuild, verified through its own
+testing process. It is not affiliated with, endorsed by, or produced by either of the
+above.
+
+## YouTube content — copyright and Terms of Service
+
+This pipeline downloads caption/transcript data from YouTube via `yt-dlp` and uses it
+as input to an LLM synthesis step. Before pointing this at any channel:
+
+- **You are responsible for your own compliance** with YouTube's Terms of Service and
+  applicable copyright law for any channel you configure this against — this includes
+  channels you don't own or control. This project does not provide legal advice, and
+  using it against content you don't have rights to process is done at your own risk.
+- **Intended use is personal reference and curation** — turning a creator's public
+  video/transcript content into a private, personal knowledge base that helps you decide
+  what's worth your time and how it maps to your own goals, not republishing,
+  reposting, or repackaging someone else's content as your own output. That distinction
+  matters in practice, not just in principle: a private research/decision-support tool
+  and a tool for scraping content to redistribute elsewhere are different activities with
+  different risk, even when the underlying code is identical.
+- Captions/transcripts, once downloaded, are transformed (cleaned, then synthesized into
+  new wiki pages by an LLM) rather than republished verbatim — but the synthesized output
+  can still closely track the source material's substance. If you intend to publish or
+  share any vault's output beyond personal use, that shifts you toward the
+  redistribution end of the spectrum above, and you should weigh ToS/copyright
+  obligations accordingly at that point, not assume the transformation alone settles it.
+- YouTube's ToS restricts automated access and downloading in ways that can change
+  without notice; `yt-dlp` itself is a third-party tool not affiliated with YouTube, and
+  its continued function against any given channel is not guaranteed by this project.
 
 ## Architecture
 
@@ -95,6 +171,15 @@ YouTube channel
 └──────────────────┘
 ```
 
+**The `run-claude-synthesis` step is where the actual agentic decision-making
+happens.** Claude Code reads each source transcript and decides what to do with it,
+guided by `vaults/<VaultName>/config/claude.md` — a plain-language instruction file,
+**local to each vault**, that governs what counts as a concept vs. a tool vs. a
+workflow, how existing pages should be updated vs. left alone, and (for the monthly
+`lint-review` job) what to check the vault for. Every vault gets its own copy of this
+file from `_template` when it's created, so you can tune synthesis behavior
+per-channel without touching any code — edit `claude.md`, not the scripts.
+
 ## Inside one vault
 
 ```
@@ -110,101 +195,6 @@ vaults/<VaultName>/
 ├── reports/         lint-review output (monthly)
 └── logs/            run logs (local only, not synced to Drive)
 ```
-
-## Telegram notifications
-
-Every pipeline run sends you a message — success, failure, or nothing-to-do — so you
-don't have to check logs manually.
-
-**Telegram is a free messaging app**, available on iOS, Android, and desktop
-(telegram.org) — if you don't already use it, install it on your phone first; this is
-where your run notifications will actually appear.
-
-Setup:
-1. Message **@BotFather** on Telegram, send `/newbot`, follow the prompts — you'll get
-   back a bot token (a long string like `123456:ABC-DEF...`).
-2. Start a chat with your new bot (search its username, send it any message) so it's
-   allowed to message you back.
-3. Get your chat ID — message **@userinfobot**, it'll reply with your numeric ID.
-4. Copy a template to `secrets.env` and fill in your real values — two options
-   depending on whether you want one bot for every vault, or a different one per
-   vault:
-   - **Per-vault** (different bot/chat for each vault):
-     ```bash
-     cp vaults/_template/config/secrets.env.example vaults/<YourVault>/config/secrets.env
-     ```
-   - **Shared** (one bot/chat for every vault):
-     ```bash
-     cp agent/secrets.env.example agent/secrets.env
-     ```
-   - Vault-level `secrets.env` is checked first if both exist — see
-     `send-notification.ps1`'s credential resolution order for the exact
-     precedence.
-   Then open the file you just created and fill in your real values:
-   ```
-   TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
-   TELEGRAM_CHAT_ID=987654321
-   ```
-   Save the file — that's the entire setup, no code changes needed.
-5. If this file is missing, notifications are silently skipped (not an error), so a
-   run without Telegram configured still works, you just won't get pinged.
-
-**What to expect in the message** — five possible events, each meaning something
-different:
-
-| Event | Meaning |
-|---|---|
-| `Blocked` | Run couldn't start — another run for this vault is already in progress |
-| `Failed` | A real content-pipeline stage broke — this is the one to actually act on |
-| `PartialSuccess` | Real content work succeeded; only a non-critical stage (sync/backup) had an issue |
-| `Success` | Real content work completed this run |
-| `NoChange` | Ran cleanly, nothing new to do — not an error |
-
-Every message also includes a `Stats` line (new/retried/parked video counts) so you
-can see what actually happened without digging into logs.
-
-## Attribution
-
-This project is an independent extension of a publicly shared idea, not an original
-concept from scratch. It builds on:
-
-- **Andrej Karpathy** — original concept/gist describing an LLM-driven pipeline that
-  turns YouTube video transcripts into structured wiki-style knowledge pages.
-  https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
-- **Nate Herk** — the YouTube channel whose content was used as the original real-world
-  source/proving ground for the single-vault predecessor to this multi-vault build.
-  https://www.youtube.com/watch?v=sboNwYmH3AY
-
-This repository is a from-spec, multi-vault rebuild verified against a locked
-architecture specification (see `agent/docs/architecture-spec.md`), built independently
-of the ChatGPT-produced package it supersedes. It is not affiliated with, endorsed by,
-or produced by either of the above.
-
-## YouTube content — copyright and Terms of Service
-
-This pipeline downloads caption/transcript data from YouTube via `yt-dlp` and uses it
-as input to an LLM synthesis step. Before pointing this at any channel:
-
-- **You are responsible for your own compliance** with YouTube's Terms of Service and
-  applicable copyright law for any channel you configure this against — this includes
-  channels you don't own or control. This project does not provide legal advice, and
-  using it against content you don't have rights to process is done at your own risk.
-- **Intended use is personal reference and curation** — turning a creator's public
-  video/transcript content into a private, personal knowledge base that helps you decide
-  what's worth your time and how it maps to your own goals, not republishing,
-  reposting, or repackaging someone else's content as your own output. That distinction
-  matters in practice, not just in principle: a private research/decision-support tool
-  and a tool for scraping content to redistribute elsewhere are different activities with
-  different risk, even when the underlying code is identical.
-- Captions/transcripts, once downloaded, are transformed (cleaned, then synthesized into
-  new wiki pages by an LLM) rather than republished verbatim — but the synthesized output
-  can still closely track the source material's substance. If you intend to publish or
-  share any vault's output beyond personal use, that shifts you toward the
-  redistribution end of the spectrum above, and you should weigh ToS/copyright
-  obligations accordingly at that point, not assume the transformation alone settles it.
-- YouTube's ToS restricts automated access and downloading in ways that can change
-  without notice; `yt-dlp` itself is a third-party tool not affiliated with YouTube, and
-  its continued function against any given channel is not guaranteed by this project.
 
 ## Prerequisites and host setup
 
@@ -222,6 +212,13 @@ none of it is installed automatically by this repository.
    Install via your distro's package manager or `pip install yt-dlp`
    (`--break-system-packages` may be required on newer Ubuntu/Debian). Keep it
    updated — YouTube-facing extractors break and get patched frequently upstream.
+   **Note:** a user-level `pip install --user` puts the binary at
+   `$HOME/.local/bin/yt-dlp`, which is not always on a plain SSH session's default
+   `$PATH` — confirmed directly on this project's own test VM. If `yt-dlp --version`
+   reports "not found" over SSH despite being installed, check that path explicitly
+   before assuming something's broken (this pipeline's own scripts already handle
+   this via their own PATH-fixup logic — this note is for your own manual
+   troubleshooting, not something the pipeline itself gets tripped up by).
 4. **`rclone`:** used for all Google Drive sync (pull/push) and backup. Install per
    https://rclone.org/install/, then see "Google Drive setup" below for the
    one-time remote configuration this pipeline expects.
@@ -232,6 +229,10 @@ none of it is installed automatically by this repository.
    direct IP was blocked by YouTube — see "YouTube access via VPN/proxy" in
    `agent/docs/README.md`. This is a host-level prerequisite this package does not
    install or manage; only needed if your own host/IP hits the same restriction.
+7. **Telegram (optional but recommended):** free messaging app (iOS/Android/desktop,
+   telegram.org) that this pipeline uses to send you run notifications. See
+   "Telegram notifications" below for full setup — nothing to install on the host
+   itself beyond having the app on your phone.
 
 ## Google Drive setup
 
@@ -286,9 +287,12 @@ two different auth models — pick one before running this pipeline for real:
 
 **Subscription auth (Claude Pro/Max), via OAuth — what this project's own VM actually
 uses, confirmed empirically through real testing, not assumed:**
-1. Install the Claude Code CLI (npm package `@anthropic-ai/claude-code`; requires
-   Node.js — see the official install docs for current requirements:
-   https://docs.claude.com/en/docs/claude-code/overview).
+1. Install the Claude Code CLI (npm package `@anthropic-ai/claude-code`). Once
+   installed, it runs as a standalone binary and **does not require Node.js to be
+   present at runtime** — confirmed on this project's own test VM, which has zero
+   Node.js installed anywhere. Node.js may still be needed for the install step
+   itself depending on your install method — check current official docs for the
+   authoritative current process: https://docs.claude.com/en/docs/claude-code/overview.
 2. Run `claude` interactively once on the host and complete the browser-based OAuth
    login with your Claude.ai account. This links the CLI to your subscription rather
    than to a billed API key.
@@ -319,6 +323,58 @@ project's own scheduled runs are verified against:**
 For current, authoritative install and auth steps, always check the official docs
 directly rather than relying solely on this section:
 https://docs.claude.com/en/docs/claude-code/overview
+
+## Telegram notifications
+
+Every pipeline run sends you a message — success, failure, or nothing-to-do — so you
+don't have to check logs manually.
+
+**Telegram is a free messaging app**, available on iOS, Android, and desktop
+(telegram.org) — if you don't already use it, install it on your phone first; this is
+where your run notifications will actually appear.
+
+Setup:
+1. Message **@BotFather** on Telegram, send `/newbot`, follow the prompts — you'll get
+   back a bot token (a long string like `123456:ABC-DEF...`).
+2. Start a chat with your new bot (search its username, send it any message) so it's
+   allowed to message you back.
+3. Get your chat ID — message **@userinfobot**, it'll reply with your numeric ID.
+4. Copy a template to `secrets.env` and fill in your real values — two options
+   depending on whether you want one bot for every vault, or a different one per
+   vault:
+   - **Per-vault** (different bot/chat for each vault):
+     ```bash
+     cp vaults/_template/config/secrets.env.example vaults/<YourVault>/config/secrets.env
+     ```
+   - **Shared** (one bot/chat for every vault):
+     ```bash
+     cp agent/secrets.env.example agent/secrets.env
+     ```
+   - Vault-level `secrets.env` is checked first if both exist — see
+     `send-notification.ps1`'s credential resolution order for the exact
+     precedence.
+   Then open the file you just created and fill in your real values:
+   ```
+   TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+   TELEGRAM_CHAT_ID=987654321
+   ```
+   Save the file — that's the entire setup, no code changes needed.
+5. If this file is missing, notifications are silently skipped (not an error), so a
+   run without Telegram configured still works, you just won't get pinged.
+
+**What to expect in the message** — five possible events, each meaning something
+different:
+
+| Event | Meaning |
+|---|---|
+| `Blocked` | Run couldn't start — another run for this vault is already in progress |
+| `Failed` | A real content-pipeline stage broke — this is the one to actually act on |
+| `PartialSuccess` | Real content work succeeded; only a non-critical stage (sync/backup) had an issue |
+| `Success` | Real content work completed this run |
+| `NoChange` | Ran cleanly, nothing new to do — not an error |
+
+Every message also includes a `Stats` line (new/retried/parked video counts) so you
+can see what actually happened without digging into logs.
 
 ## Quick start
 
@@ -427,13 +483,13 @@ sudo systemctl restart wikiagent.timer
 `vaults/_template` is), so a plain `git pull` does not touch it: git's merge refuses to
 silently overwrite an *untracked* file at a path an incoming commit wants to create or
 modify — it aborts with a "would be overwritten by merge" error instead of deleting
-anything. Since no upstream commit creates paths under `vaults/DWSIM/`, `vaults/Nate_Herk/`,
-or any other deployed vault, that conflict path never arises here in practice. Verified for
-real in a disposable scratch clone: hashed every file under a test vault directory, ran
-`git pull`, re-hashed — byte-identical (the pull was a no-op fast-forward, since no new
-upstream commits existed to pull at verification time; the untracked-path-conflict guarantee
-above rests on git's documented merge behavior rather than a fabricated conflict scenario, to
-avoid pushing a throwaway commit upstream just to force one).
+anything. Since no upstream commit creates paths under any deployed vault's directory,
+that conflict path never arises here in practice. Verified for real in a disposable
+scratch clone: hashed every file under a test vault directory, ran `git pull`,
+re-hashed — byte-identical (the pull was a no-op fast-forward, since no new upstream
+commits existed to pull at verification time; the untracked-path-conflict guarantee
+above rests on git's documented merge behavior rather than a fabricated conflict
+scenario, to avoid pushing a throwaway commit upstream just to force one).
 
 ## Uninstall
 
