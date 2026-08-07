@@ -276,9 +276,72 @@ Some YouTube channels require an authenticated session to reliably serve caption
    Claude Code — only referenced by path.
 3. Set `cookie_file` in the relevant vault's `config/vault.json` to the real path
    on the host.
-4. Treat the cookie file itself as a credential: keep it out of git (already
-   excluded via `.gitignore`'s `vaults/*` pattern), restrict its file permissions,
-   and rotate/re-export it if the source browser session's login changes.
+4. Treat the cookie file itself as a credential: keep it out of git (real files
+   under `agent/secrets/` are excluded via `.gitignore`'s `agent/secrets/*` pattern
+   — see "Fresh Install: Credential Setup" below for the full layout), restrict
+   its file permissions, and rotate/re-export it if the source browser session's
+   login changes.
+
+## Fresh Install: Credential Setup
+
+All real credentials this pipeline uses — per-channel YouTube cookie files, the
+Telegram bot token/chat ID, and the WireGuard proxy config — live under
+`agent/secrets/` and `agent/secrets.env`. Neither is created by cloning this repo;
+both are gitignored on purpose (see `.gitignore`'s `agent/secrets/*` and
+`agent/secrets.env` rules) so real credentials never end up in git. Every real
+file has a git-tracked `.example` template next to it (or, for `agent/secrets.env`,
+alongside it as `agent/secrets.env.example`) showing the exact structure to fill in.
+
+1. **Cookie files and the WireGuard proxy config**: for each `.example` file under
+   `agent/secrets/`, copy it to the same name with `.example` stripped, then fill
+   in real values:
+   ```bash
+   cd agent/secrets
+   cp wireproxy-youtube.conf.example wireproxy-youtube.conf
+   cp proton-youtube.conf.example proton-youtube.conf
+   # cookie files: see step 3 below for the real per-vault naming
+   ```
+   `proton-youtube.conf` needs a real WireGuard client config (private key, address,
+   peer public key, endpoint) from your VPN provider — see "YouTube access via
+   VPN/proxy" in `agent/docs/README.md` for why this is needed and what it's for.
+
+2. **Telegram notifications**: copy `agent/secrets.env.example` to `agent/secrets.env`
+   and fill in your real bot token and chat ID:
+   ```bash
+   cp agent/secrets.env.example agent/secrets.env
+   ```
+   See "Telegram notifications" above for how to obtain those two values. This is
+   the shared/agent-level file — a vault can override it with its own
+   `config/secrets.env` (see `vaults/_template/config/secrets.env.example`) if you
+   want a different bot/chat per vault.
+
+3. **Per-vault cookie files**: create one cookie file per vault that needs one,
+   named `<vault_name>_youtube_cookies.txt` under `agent/secrets/` — the
+   `<vault_name>` must match that vault's own `vault_name` in its
+   `config/vault.json` exactly (see `agent/secrets/example_channel_name_youtube_cookies.txt.example`
+   for the real Netscape cookie-file format `yt-dlp` expects). Follow "Cookie file
+   setup" above for how to actually export one from a real browser session.
+
+4. **Point each vault at its cookie file**: set `cookie_file` in that vault's own
+   `config/vault.json` to the real absolute path of the file you just created under
+   `agent/secrets/` (e.g. `/home/ubuntu/wiki-agent-pipeline/agent/secrets/mychannel_youtube_cookies.txt`).
+
+5. **`wireproxy-youtube.service` is a separate, manual, per-machine OS-level setup
+   step — it is NOT created by cloning this repo.** It must be created fresh on
+   every new install: a systemd unit at `/etc/systemd/system/wireproxy-youtube.service`
+   whose `ExecStart` line points `wireproxy` at the real absolute path of your
+   `wireproxy-youtube.conf` on that specific machine, then `sudo systemctl
+   daemon-reload` and `sudo systemctl enable --now wireproxy-youtube.service`. This
+   is what actually runs the proxy that `vault.json`'s `proxy` field (and, upstream
+   of it, `wireproxy-youtube.conf`'s own `WGConfig` line) depends on.
+
+6. **This pipeline uses absolute paths throughout, with no runtime path
+   resolution** — `cookie_file` in each `vault.json`, `ExecStart` in the systemd
+   unit, and `WGConfig` in `wireproxy-youtube.conf` are all literal, hardcoded
+   paths, passed straight through with no rewriting. None of these can be copied
+   verbatim from another machine's setup (or from this doc's own examples) — every
+   one must be manually updated to match the new machine's actual username and
+   home directory.
 
 ## Claude Code / Claude API authentication
 
