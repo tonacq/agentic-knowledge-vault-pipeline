@@ -8,3 +8,6 @@ agent/scheduling/schedule.csv
 # Session-local operational artifacts
 agent/scheduling/dispatch-logs/
 conformance-report*.json
+agent/secrets/*
+!agent/secrets/*.example
+agent/secrets.env
