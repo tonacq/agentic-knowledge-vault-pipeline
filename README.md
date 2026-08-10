@@ -460,15 +460,6 @@ pwsh agent/tests/architecture-conformance-test.ps1 -RootPath . -ReportPath confo
 maps to a monthly cadence, not weekly; see `agent/docs/schedule-contract.md` for the
 exact rule before assuming a lint-review row runs every week.
 
-**Note on this specific host:** a separate, older systemd timer named
-`nate-herk-weekly.timer` also exists on this machine. It predates this repo's
-multivault architecture, calls a completely separate legacy script tree
-(`/home/ubuntu/wiki-agent/`, not this repo), and targets a Google Drive folder
-(`Wikis/NateHerk_Rev06`) that this project's `NateHerk_Rev07` vault has superseded.
-It is unrelated to `wikiagent.timer`/`wikiagent.service` above, is not part of this
-repo, and is not documented further here — it is a known separate cleanup item for
-a future change, not addressed by the scheduling setup described in this README.
-
 ## Config field reference (`config/vault.json`)
 
 The quick-start's "edit `vault.json`" step undersells how many fields matter. Real
