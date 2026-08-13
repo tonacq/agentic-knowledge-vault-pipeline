@@ -441,13 +441,44 @@ can see what actually happened without digging into logs.
 
 ## Quick start
 
+By default, this system expects to be deployed as a folder named exactly
+`wiki-agent-pipeline`. It can, however, be renamed and located anywhere, and can run
+as any Linux user — running `install.sh` (see below) handles both automatically. Run
+it once after initial deployment, and again any time the folder is later moved,
+renamed, or its ownership changes: it detects and re-applies whatever is currently
+true each time it runs, but has no way to notice a move on its own — if the
+deployment is relocated without re-running it, the scheduled timer keeps pointing at
+the old, now-incorrect location and silently stops firing.
+
 ```bash
-# 1. Deploy this whole WikiAgent/ folder to the target host (e.g. /home/ubuntu/WikiAgent)
+# 1. Deploy this whole repo to the target host as a folder named exactly
+#    wiki-agent-pipeline, under /home/ubuntu/ (e.g. /home/ubuntu/wiki-agent-pipeline)
 # 2. Copy the template for a new vault:
 cp -r vaults/_template vaults/MyNewVault
 # 3. Edit vaults/MyNewVault/config/vault.json (channel_url, creator, drive_path, etc.)
 # 4. Add one row to agent/scheduling/schedule.csv:
 #    MyNewVault,full,Sun,09:00,true
+```
+
+> **The folder name and location above are load-bearing — read this before step 5.**
+> The systemd unit files shipped in this repo
+> (`agent/scheduling/ubuntu/systemd/wikiagent.service`) hardcode the path
+> `/home/ubuntu/wiki-agent-pipeline`. If you deployed to exactly that folder
+> name and location in step 1, the commands below work with zero edits.
+> **If you used a different name or location, the timer will install and
+> enable successfully but will silently never fire** — there's no error, it
+> just never runs. Either:
+> - run `sudo ./install.sh` instead of the commands below — it detects your
+>   real install path automatically and generates the correct unit files for
+>   you, whatever you named the folder or wherever you put it. This is the
+>   recommended option unless you have a specific reason to edit the unit
+>   file yourself; see "Recommended: `install.sh`" below for exactly what it
+>   does and doesn't do — or
+> - manually edit the `WorkingDirectory` and `ExecStart` lines in
+>   `agent/scheduling/ubuntu/systemd/wikiagent.service` to match your real
+>   path before running the commands below.
+
+```bash
 # 5. Install the systemd units and enable the timer:
 sudo cp agent/scheduling/ubuntu/systemd/*.service agent/scheduling/ubuntu/systemd/*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -459,6 +490,32 @@ pwsh agent/tests/architecture-conformance-test.ps1 -RootPath . -ReportPath confo
 `schedule.csv` only expresses a weekly day/time — for the `lint-review` job type this
 maps to a monthly cadence, not weekly; see `agent/docs/schedule-contract.md` for the
 exact rule before assuming a lint-review row runs every week.
+
+### Recommended: `install.sh`
+
+Run this once, from the repo root, after copying/unzipping the repo onto your host —
+`sudo ./install.sh` — as an alternative to step 5 above and to manually editing
+`wikiagent.service`. It detects the repo's real current location itself (whatever you
+named the folder, wherever you put it) and generates the systemd unit files against
+that real path, rather than relying on the checked-in files' hardcoded
+`/home/ubuntu/wiki-agent-pipeline`. Safe to re-run any time — it detects an
+already-installed, already-active timer and reports that rather than erroring or
+duplicating anything.
+
+**What it does**: checks that `pwsh`, `rclone`, and `systemctl` are present (fails
+with a clear, specific message naming what's missing if not — it does not install
+them for you); generates and installs the two systemd unit files with the correct
+real path; enables and starts the hourly timer; creates `agent/scheduling/schedule.csv`
+from `schedule.csv.example` (header row only) if one doesn't already exist, and leaves
+it untouched if it does.
+
+**What it explicitly does not do** — still your responsibility, same as if you'd run
+step 5 manually: it does not create a vault, does not edit any `vault.json`, and does
+not touch credentials or proxy setup (rclone remote, Claude Code auth, Telegram
+bot/chat, cookie files, WireGuard/proxy config — see "Fresh Install: Credential
+Setup" below) or any of the other prerequisites in "Prerequisites and host setup".
+Those all remain manual, one-time steps this script assumes are already done, or that
+you'll still do afterward.
 
 ## Config field reference (`config/vault.json`)
 
@@ -531,7 +588,7 @@ To upgrade an existing installation in place:
 
 ```bash
 # 1. Pull the latest commits into the existing clone
-cd /path/to/WikiAgent   # e.g. /home/ubuntu/WikiAgent
+cd /path/to/wiki-agent-pipeline   # e.g. /home/ubuntu/wiki-agent-pipeline, or wherever you actually deployed it
 git pull
 
 # 2. Re-verify architecture conformance against the updated code
@@ -595,7 +652,7 @@ directory is only ever a working copy (see `agent/scripts/sync-vault.ps1`'s own 
    ```
 4. Only after steps 1–3: delete the repo folder.
    ```bash
-   rm -rf /path/to/WikiAgent
+   rm -rf /path/to/wiki-agent-pipeline   # e.g. /home/ubuntu/wiki-agent-pipeline, or wherever you actually deployed it
    ```
 
 **Verified for real** (disposable scratch clone + scratch vault, never against real vault
