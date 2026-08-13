@@ -2,12 +2,15 @@
 # One-time, host-level setup: installs the systemd timer that dispatches
 # scheduled vault runs, using this repo's REAL current location and the REAL
 # invoking user (whatever the folder was named, wherever it was deployed,
-# whoever actually owns it) instead of assuming the checked-in unit files'
-# hardcoded /home/ubuntu/wiki-agent-pipeline path and "ubuntu" user are
-# correct. Re-run any time the deployment is moved, renamed, or its
-# ownership changes - the timer keeps pointing at whatever was true the last
-# time this script ran, not the live current state. Safe to re-run at any
-# time regardless (idempotent).
+# whoever actually owns it). Convention-agnostic by design: substitutes each
+# of WorkingDirectory/ExecStart/User/Group/Environment=HOME by matching the
+# systemd KEY, not the checked-in template's current value - so this same,
+# unmodified script works correctly regardless of which hardcoded
+# path/user convention a given checkout's wikiagent.service happens to ship
+# with. Re-run any time the deployment is moved, renamed, or its ownership
+# changes - the timer keeps pointing at whatever was true the last time this
+# script ran, not the live current state. Safe to re-run at any time
+# regardless (idempotent).
 #
 # Does NOT: create a vault, edit any vault.json, or set up credentials
 # (rclone remote, Claude Code auth, Telegram bot, YouTube proxy). Does NOT
@@ -88,12 +91,21 @@ fi
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+# Convention-agnostic by design: matches each line by its systemd KEY (anchored
+# at start of line), and replaces the entire value regardless of what it
+# currently is - "/home/ubuntu/wiki-agent-pipeline", "/home/ubuntu/WikiAgent",
+# or anything else a differently-converted checkout might have. Does not
+# depend on knowing or matching the OLD value at all, unlike a literal-string
+# substitution - that's the actual fix here, not just a different string.
+# Confirmed via direct inspection of both this project's real repos' checked-in
+# wikiagent.service files that ExecStart is always a bare script path with no
+# trailing arguments, so a full-line replace loses nothing real.
 sed \
-    -e "s#WorkingDirectory=/home/ubuntu/wiki-agent-pipeline#WorkingDirectory=${REPO_ROOT}#" \
-    -e "s#ExecStart=/home/ubuntu/wiki-agent-pipeline/#ExecStart=${REPO_ROOT}/#" \
-    -e "s#User=ubuntu#User=${REAL_USER}#" \
-    -e "s#Group=ubuntu#Group=${REAL_GROUP}#" \
-    -e "s#Environment=HOME=/home/ubuntu#Environment=HOME=${REAL_HOME}#" \
+    -e "s#^WorkingDirectory=.*#WorkingDirectory=${REPO_ROOT}#" \
+    -e "s#^ExecStart=.*#ExecStart=${REPO_ROOT}/agent/scheduling/ubuntu/run-wikiagent.sh#" \
+    -e "s#^User=.*#User=${REAL_USER}#" \
+    -e "s#^Group=.*#Group=${REAL_GROUP}#" \
+    -e "s#^Environment=HOME=.*#Environment=HOME=${REAL_HOME}#" \
     "$UNIT_SRC_DIR/wikiagent.service" > "$TMP_DIR/wikiagent.service"
 cp "$UNIT_SRC_DIR/wikiagent.timer" "$TMP_DIR/wikiagent.timer"
 
