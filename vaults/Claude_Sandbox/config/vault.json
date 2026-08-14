@@ -30,5 +30,8 @@
     "remote": "gdrive",
     "destination": "",
     "keep": 12
-  }
+  },
+  "batch_size": 5,
+  "batch_iterations": 1,
+  "continuity": false
 }
